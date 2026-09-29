@@ -1,0 +1,63 @@
+// NextAuth + EmailProvider 표준 schema.
+// 2026-07-15: 인증 DB를 Postgres로 통합(medi-back과 같은 medi-postgres 인스턴스의
+// 별도 DB `medi_auth`). 구 SQLite(베타)는 백업 부재로 은퇴 — 이관 런북은
+// docs/auth_db_postgres_migration.md. dev도 동일 provider(로컬 PG 또는 컨테이너).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String?   @unique
+  emailVerified DateTime?
+  name          String?
+  image         String?
+  // bcrypt 해시. 매직 링크 첫 인증 후 /auth/set-password에서 박힘.
+  passwordHash  String?
+  // 로그인 브루트포스 잠금 — 비번 연속 실패 누적, 임계 도달 시 lockedUntil 까지
+  // 차단. 비번 재설정(set-password) 완료 시 즉시 해제.
+  failedLoginCount Int       @default(0)
+  lockedUntil      DateTime?
+  accounts      Account[]
+  sessions      Session[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}

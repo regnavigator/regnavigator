@@ -1,0 +1,83 @@
+# medi-front — medi-back과 같은 VM, 같은 medi-net 네트워크 공유
+# 환경변수는 /opt/medi-front/.env.docker에서 주입
+#
+# 인증 DB: 2026-07-15부터 Postgres(medi-back의 medi-postgres 인스턴스 내 별도
+#   DB `medi_auth`). DATABASE_URL은 postgresql://medi:***@postgres:5432/medi_auth.
+#   백업은 medi-back의 medi-backup(pg_dump)이 medi_auth까지 커버.
+#   최초 컷오버(DB 생성·SQLite 데이터 이관) 런북: docs/archive/auth_db_postgres_migration.md
+#
+# 기동 순서: medi-front-migrate(prisma migrate deploy, 1회 실행 후 종료)가 성공해야
+#   medi-front가 뜬다(depends_on service_completed_successfully). 스키마 없는 채로
+#   앱이 떠서 500 쏟는 사고 방지.
+
+services:
+  # ── 마이그레이터 — 배포마다 prisma migrate deploy 1회. 성공 후 종료(restart no).
+  medi-front-migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: migrator
+    image: medi-front-migrate:latest
+    container_name: medi-front-migrate
+    restart: "no"
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+    # prisma migrate deploy는 Dockerfile migrator 타깃의 CMD. 이미 적용된 마이그레이션은
+    # skip(멱등) — 재배포 안전.
+    depends_on: []
+    networks:
+      - medi-net
+
+  medi-front:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # NEXT_PUBLIC_* 는 build 시점에 client bundle에 inline됨 — 모두 ARG로 전달.
+        NEXT_PUBLIC_DEPLOYMENT_URL: ${NEXT_PUBLIC_DEPLOYMENT_URL}
+        NEXT_PUBLIC_ASSISTANT_ID: ${NEXT_PUBLIC_ASSISTANT_ID}
+        NEXT_PUBLIC_ASSISTANT_ID_DEEP: ${NEXT_PUBLIC_ASSISTANT_ID_DEEP}
+        NEXT_PUBLIC_LANGSMITH_KEY: ${NEXT_PUBLIC_LANGSMITH_KEY}
+        NEXT_PUBLIC_DUMMY_MODE: ${NEXT_PUBLIC_DUMMY_MODE}
+        NEXT_PUBLIC_AUTH_BYPASS: ${NEXT_PUBLIC_AUTH_BYPASS}
+        # 배포 식별값(src/lib/site.ts) — 비우면 코드 기본값
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-}
+        NEXT_PUBLIC_SUPPORT_EMAIL: ${NEXT_PUBLIC_SUPPORT_EMAIL:-}
+        NEXT_PUBLIC_MAIL_FROM: ${NEXT_PUBLIC_MAIL_FROM:-}
+        NEXT_PUBLIC_ROOT_ADMIN_EMAIL: ${NEXT_PUBLIC_ROOT_ADMIN_EMAIL:-}
+    image: medi-front:latest
+    container_name: medi-front
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      # 서버 측 시크릿 — runtime에만 사용 (client bundle에 inline X)
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}        # ⚠️ medi-back과 동일 값
+      NEXTAUTH_URL: ${NEXTAUTH_URL}              # https://app.example.com
+      DATABASE_URL: ${DATABASE_URL}              # postgresql://medi:***@postgres:5432/medi_auth
+      EMAIL_SERVER: ${EMAIL_SERVER}
+      EMAIL_FROM: ${EMAIL_FROM}
+      RESEND_API_KEY: ${RESEND_API_KEY}
+      BETA_ALLOWED_EMAILS: ${BETA_ALLOWED_EMAILS}
+      BETA_ALLOWED_DOMAINS: ${BETA_ALLOWED_DOMAINS}
+      # 관리자 이메일(session.user.isAdmin) — 누락 시 관리자도 점검 화면에 갇힘(2026-09-07). medi-back 과 같은 값
+      ADMIN_EMAILS: ${ADMIN_EMAILS}
+      # NEXT_PUBLIC_* 는 build 시점에 inline됐지만 runtime에도 노출 (server-side 코드용)
+      NEXT_PUBLIC_DEPLOYMENT_URL: ${NEXT_PUBLIC_DEPLOYMENT_URL}
+      NEXT_PUBLIC_ASSISTANT_ID: ${NEXT_PUBLIC_ASSISTANT_ID}
+      NEXT_PUBLIC_ASSISTANT_ID_DEEP: ${NEXT_PUBLIC_ASSISTANT_ID_DEEP}
+      NEXT_PUBLIC_LANGSMITH_KEY: ${NEXT_PUBLIC_LANGSMITH_KEY}
+      NEXT_PUBLIC_DUMMY_MODE: ${NEXT_PUBLIC_DUMMY_MODE}
+      NEXT_PUBLIC_AUTH_BYPASS: ${NEXT_PUBLIC_AUTH_BYPASS}
+    # Postgres 전환으로 SQLite 볼륨(medi_front_db) 제거 — 인증 상태는 medi-postgres에 영속.
+    depends_on:
+      medi-front-migrate:
+        condition: service_completed_successfully
+    networks:
+      - medi-net
+
+networks:
+  medi-net:
+    external: true                                # medi-back의 medi-net 재사용
+    name: medi-net
