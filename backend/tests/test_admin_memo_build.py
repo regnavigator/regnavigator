@@ -30,14 +30,14 @@ def users(tmp_path, monkeypatch):
 def test_admin_memo_and_profile_fill(users):
     from src.routes import admin as r
 
-    out = asyncio.run(r.admin_update_user("u1", _Req({"admin_memo": "  OO대 호흡기내과 A교수 "}), _admin=None))
-    assert users.get("u1").admin_memo == "OO대 호흡기내과 A교수"
-    assert out.get("admin_memo") == "OO대 호흡기내과 A교수" if isinstance(out, dict) and "admin_memo" in out else True
+    out = asyncio.run(r.admin_update_user("u1", _Req({"admin_memo": "  OO대 내과 A교수 "}), _admin=None))
+    assert users.get("u1").admin_memo == "OO대 내과 A교수"
+    assert out.get("admin_memo") == "OO대 내과 A교수" if isinstance(out, dict) and "admin_memo" in out else True
     # 프로필은 준 키만 바꾸고 나머지는 보존
-    asyncio.run(r.admin_update_user("u1", _Req({"affiliation": "제휴대병원"}), _admin=None))
+    asyncio.run(r.admin_update_user("u1", _Req({"affiliation": "화순전남대병원"}), _admin=None))
     asyncio.run(r.admin_update_user("u1", _Req({"job_role": "의사"}), _admin=None))
     u = users.get("u1")
-    assert u.affiliation == "제휴대병원" and u.job_role == "의사" and u.display_name is None
+    assert u.affiliation == "화순전남대병원" and u.job_role == "의사" and u.display_name is None
     # 메모 비우기
     asyncio.run(r.admin_update_user("u1", _Req({"admin_memo": ""}), _admin=None))
     assert users.get("u1").admin_memo is None

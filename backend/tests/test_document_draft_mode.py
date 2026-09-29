@@ -62,7 +62,7 @@ class TestDraftFormAssets:
         out = draft_form_assets("연구계획심의 의뢰서 초안 작성해줘")  # 'irb' 없어도 '심의'로 매칭
         assert len(out) == 2
         assert out[0]["id"].startswith("skill:irb-form-filler")
-        assert "제휴대" in out[0]["publisher"]
+        assert "화순전남대" in out[0]["publisher"]
         assert "서식 11" in out[0]["text"]
 
     def test_drb_requires_explicit_keyword(self, monkeypatch, tmp_path):

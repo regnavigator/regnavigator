@@ -1,0 +1,91 @@
+{
+  "version": "02311b68f3ea",
+  "skills": [
+    {
+      "name": "drb-form-filler",
+      "dir": "drb-form-filler",
+      "description": "화순전남대학교병원 의료정보데이터심의위원회(DRB) 별지서식을 사용자 정보로 채워 초안을 만든다. 데이터 활용 신청서, 항목별 가명처리계획서, 변경심의·지속심의·신속심의·종료심의·보완심의·이의 신청서, 변경대비표, 활용데이터 선정 사유 및 요구 수준표, 내부관리계획서 등. \"데이터 활용 신청서 작성해줘\", \"가명처리계획서 어떻게 쓰나요\", \"항목별 가명처리 어떤 수준으로\", \"DRB 변경대비표 만들어줘\", \"지속심의 신청서 초안\", \"내부관리계획서 필요한데\" 같은 요청에 사용. 심의 종류 판정이 먼저 필요하면 drb-triage를, 서류 목록만 필요하면 drb-procedure를, IRB 서식은 irb-form-filler를 사용한다.",
+      "body_chars": 2019,
+      "references": [
+        "references/field-mapping.md",
+        "references/form-registry.md",
+        "references/pseudonymization-plan.md"
+      ],
+      "digest": "87e708543a51bd46"
+    },
+    {
+      "name": "drb-procedure",
+      "dir": "drb-procedure",
+      "description": "화순전남대학교병원 의료정보데이터심의위원회(DRB)의 심의 절차, 신청 유형별 제출서류, 소요기간, 결정 유형, 이의신청, 승인 후 의무를 안내한다. \"DRB 어떻게 신청해요\", \"데이터 활용 신청서류 뭐 내야 하나요\", \"DRB 심의 얼마나 걸려요\", \"지속심의 언제까지\", \"DRB 이의신청 기간\", \"종료보고 언제까지\", \"보완 받았는데 어떻게 하나요\", \"DRB 별지서식 목록\", \"가명정보 제공 계약서 필요한가요\" 같은 질문에 사용. 심의 대상 여부나 심의 종류 판단이 먼저 필요하면 drb-triage를, 서식 작성은 drb-form-filler를, IRB 절차는 irb-procedure를 사용한다.",
+      "body_chars": 1725,
+      "references": [
+        "references/decisions.md",
+        "references/drb-documents.md",
+        "references/obligations.md",
+        "references/timeline.md"
+      ],
+      "digest": "2ea29c838ea63dd8"
+    },
+    {
+      "name": "drb-triage",
+      "dir": "drb-triage",
+      "description": "화순전남대학교병원 의료정보데이터심의위원회(DRB) 심의 대상 여부와 심의 종류(해당없음/심의면제/신속심의/정규심의)를 판정하고, IRB 승인과의 선후관계·유효기간 종속을 계산한다. \"DRB 심의 대상인가요\", \"의무기록으로 논문 쓰려는데 심의 받아야 하나요\", \"가명정보 반출하려는데\", \"EMR 데이터 연구에 뭐가 필요한가요\", \"데이터심의위원회 신속심의 되나요\", \"IRB랑 DRB 둘 다 받아야 하나요\", \"IRB 승인 나와야 DRB 낼 수 있나요\", \"폐쇄형 분석실에서 분석하면\", \"결합전문기관 통해서 데이터 결합\", \"DRB 승인기간 연장\" 같은 질문에 사용. 사람 대상 연구의 IRB 심의 판정은 irb-triage를, DRB 절차·서류 안내는 drb-procedure를, 서식 작성은 drb-form-filler를 사용한다.",
+      "body_chars": 3361,
+      "references": [
+        "references/authorities.md",
+        "references/drb-review-type.md",
+        "references/irb-linkage.md",
+        "references/slots.md"
+      ],
+      "digest": "17e6cd4e93f3246a"
+    },
+    {
+      "name": "irb-form-filler",
+      "dir": "irb-form-filler",
+      "description": "화순전남대학교병원 IRB 심의 신청 서식(심의면제 의뢰서, 연구계획심의 의뢰서, 변경 심의 의뢰서, 연차지속심의 의뢰서, 답변서 등)의 항목을 사용자가 제공한 정보로 채워 초안을 만든다. \"심의면제 의뢰서 작성해줘\", \"IRB 신청서 채워줘\", \"연구계획심의 의뢰서 초안\", \"변경 심의 의뢰서 만들어줘\", \"이 내용으로 IRB 서식 작성해줘\" 같은 요청에 사용. 심의 종류 판정이 먼저 필요하면 irb-triage를, 서류 목록만 필요하면 irb-procedure를, DRB 별지서식은 drb-form-filler를 사용한다.",
+      "body_chars": 2273,
+      "references": [
+        "references/field-mapping.md",
+        "references/form-registry.md"
+      ],
+      "digest": "ee971f0d40f32480"
+    },
+    {
+      "name": "irb-procedure",
+      "dir": "irb-procedure",
+      "description": "화순전남대학교병원 IRB(생명의학연구윤리심의위원회)의 심의 절차, 신청 유형별 제출서류, 소요기간, 결정 유형, 이의신청, 승인 후 의무를 안내한다. \"IRB 어떻게 신청해요\", \"IRB 서류 뭐 내야 하나요\", \"신규계획서 제출서류\", \"심의 얼마나 걸려요\", \"연차지속심사 언제까지\", \"IRB 이의신청 기간\", \"종료보고 언제까지\", \"심의면제 의뢰 서류\", \"보완 받았는데 어떻게 하나요\" 같은 질문에 사용. 심의 대상 여부나 심의 종류 판단이 먼저 필요하면 irb-triage를, 서식 작성은 irb-form-filler를, DRB 절차는 drb-procedure를 사용한다.",
+      "body_chars": 1285,
+      "references": [
+        "references/decisions.md",
+        "references/irb-documents.md",
+        "references/obligations.md",
+        "references/timeline.md"
+      ],
+      "digest": "7e6db23557c29190"
+    },
+    {
+      "name": "irb-protocol-draft",
+      "dir": "irb-protocol-draft",
+      "description": "IRB 제출용 연구계획서와 연구대상자 설명문·동의서 초안을 화순전남대학교병원 IRB 심의 기준에 맞춰 작성한다. \"연구계획서 초안 써줘\", \"IRB 계획서 작성\", \"동의서 만들어줘\", \"연구대상자 설명문 초안\", \"동의면제 사유서 작성\", \"IRB 심의 통과할 수 있게 계획서 다듬어줘\", \"이 연구계획서 심의 기준에 맞는지 봐줘\" 같은 요청에 사용. 심의 대상 여부 판정은 irb-triage, 신청 서식 항목 채우기는 irb-form-filler를 사용한다.",
+      "body_chars": 1575,
+      "references": [
+        "references/consent-outline.md",
+        "references/protocol-outline.md"
+      ],
+      "digest": "8c10f47305a3371f"
+    },
+    {
+      "name": "irb-triage",
+      "dir": "irb-triage",
+      "description": "화순전남대학교병원 기준으로 연구가 IRB 심의 대상인지, 그리고 심의 종류(심의대상 아님/심의면제/신속심의/정규심의)를 판정한다. \"IRB 받아야 하나요\", \"심의면제 되나요\", \"이 연구 IRB 대상인가요\", \"차트리뷰 IRB 필요한가요\", \"설문조사 심의 받아야 하나요\", \"잔여검체로 연구하려는데\", \"신속심의로 되나요\", \"학생 대상 연구인데 심의\", \"동의서 받아야 하나요\" 같은 질문에 사용. 연구 계획을 설명하면서 IRB 심의 필요성을 묻는 모든 경우에 사용한다. 병원 의료정보데이터 활용에 대한 DRB 심의 판정은 drb-triage를, 절차 안내는 irb-procedure를, 서식 작성은 irb-form-filler를 사용한다.",
+      "body_chars": 3219,
+      "references": [
+        "references/authorities.md",
+        "references/irb-exemption.md",
+        "references/irb-review-type.md",
+        "references/slots.md"
+      ],
+      "digest": "b499a516e7be5c45"
+    }
+  ]
+}

@@ -151,7 +151,7 @@ export default function LandingPage() {
           {/* 단계 카드 — 누르면 실제 사용 예시 모달(2026-09-02 피드백). 데이터·모달은 IrbExampleCards. */}
           <IrbExampleCards />
           <p className="mx-auto mt-10 max-w-[640px] text-center text-[13px] leading-[1.7] text-md-on-surface-variant/80">
-            판정 기준: 제휴대학교병원 IRB·DRB 지침 — AI의 예비판단이며, 최종 판단은
+            판정 기준: 화순전남대학교병원 IRB·DRB 지침 — AI의 예비판단이며, 최종 판단은
             소속 기관 심의 사무국을 따릅니다.
           </p>
         </div>

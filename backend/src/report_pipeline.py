@@ -935,7 +935,7 @@ def draft_form_assets(*texts: str) -> list[dict]:
             out.append({
                 "id": f"skill:{skill}:{fname}",
                 "title": f"{key.upper()} {label}",
-                "publisher": "제휴대학교병원 IRB/DRB SOP (기관 내부 지침)",
+                "publisher": "화순전남대학교병원 IRB/DRB SOP (기관 내부 지침)",
                 "tier": "T1",
                 "text": text,
             })

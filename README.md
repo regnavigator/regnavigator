@@ -67,6 +67,7 @@ npm run dev          # 또는 npm run dev:mock — 백엔드 없이 목 데이�
 
 ## 기관 IRB/DRB 지침 스킬
 
-기관별 연구 심의 지침을 채팅에서 안내하는 선택 기능이다. 지침 번들은 기관이 별도로 제공하며,
+기관 연구 심의(IRB·DRB) 지침을 채팅에서 안내하는 선택 기능이다. 지침 번들은
+`backend/src/skills/medireg_irb_drb/`(제휴 기관 내부 지침 — 관련자 외 재배포 금지)이며,
 `SKILL_BUNDLE_DIR` 로 번들 디렉터리를 지정하면 켜진다. 미설정이면 기능이 꺼지고 나머지는 그대로 동작한다.
 로더·연동 코드는 `backend/src/skills/`, 스위치 설명은 [`docs/OPERATIONS.md`](./docs/OPERATIONS.md) §7.

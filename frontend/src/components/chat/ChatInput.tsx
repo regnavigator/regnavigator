@@ -422,7 +422,7 @@ export function ChatInput({
                     : disabled
                       ? "설정을 먼저 입력하세요"
                       : irbMode
-                        ? "IRB/DRB 심의에 대해 물어보세요 — 심의 대상 판정·절차·서식 (제휴대병원 기준)"
+                        ? "IRB/DRB 심의에 대해 물어보세요 — 심의 대상 판정·절차·서식 (화순전남대병원 기준)"
                         : "MEDIREG AI에 메시지 보내기"
               }
               rows={MIN_ROWS}
@@ -487,7 +487,7 @@ export function ChatInput({
               </span>
             </button>
             {/* IRB/DRB 모드 — AI 키워드 감지와 별개의 명시 진입(이중 접근).
-                켜면 제휴대병원 심의 지침 기반으로 안내됨을 배지로 표시. */}
+                켜면 화순전남대병원 심의 지침 기반으로 안내됨을 배지로 표시. */}
             <button
               type="button"
               data-tour="irb"
@@ -501,7 +501,7 @@ export function ChatInput({
               title={
                 irbMode
                   ? "IRB/DRB 상담 모드 해제"
-                  : "IRB/DRB 상담 — 연구 심의 대상 판정·절차·서식 안내 (제휴대병원 기준)"
+                  : "IRB/DRB 상담 — 연구 심의 대상 판정·절차·서식 안내 (화순전남대병원 기준)"
               }
               className={
                 "inline-flex h-9 items-center gap-1.5 rounded-full px-3.5 text-[13px] font-medium transition-colors " +

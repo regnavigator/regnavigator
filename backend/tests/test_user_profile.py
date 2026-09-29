@@ -13,11 +13,11 @@ def repo(tmp_path):
 
 def test_set_profile_roundtrip(repo):
     repo.upsert(id="u1", email="doc@hospital.kr")
-    repo.set_profile("u1", display_name="김의사", affiliation="제휴대병원",
+    repo.set_profile("u1", display_name="김의사", affiliation="화순전남대병원",
                      job_role="의사")
     u = repo.get("u1")
     assert (u.display_name, u.affiliation, u.job_role) == (
-        "김의사", "제휴대병원", "의사")
+        "김의사", "화순전남대병원", "의사")
 
 
 def test_set_profile_null_clears(repo):

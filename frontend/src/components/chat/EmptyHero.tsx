@@ -110,7 +110,7 @@ const SAMPLE_PROMPTS: SamplePrompt[] = [
   {
     category: "연구 심의 (IRB·DRB)",
     title: "연구 심의 대상인지 확인하기",
-    subtitle: "심의면제·신속·정규 판정 · 절차·서식 안내 — 제휴대병원 기준",
+    subtitle: "심의면제·신속·정규 판정 · 절차·서식 안내 — 화순전남대병원 기준",
     expects: [
       "IRB 심의 대상 여부와 종류(면제·신속·정규) 예비 판정",
       "DRB(자료 반출) 필요 여부와 IRB 와의 선후",
@@ -119,7 +119,7 @@ const SAMPLE_PROMPTS: SamplePrompt[] = [
     featured: true,
     form: {
       intro:
-        "연구 개요를 입력하면 IRB(연구윤리)·DRB(의료데이터) 심의 대상 여부와 절차를 안내합니다. (제휴대학교병원 지침 기준 예비판단)",
+        "연구 개요를 입력하면 IRB(연구윤리)·DRB(의료데이터) 심의 대상 여부와 절차를 안내합니다. (화순전남대학교병원 지침 기준 예비판단)",
       fields: [
         {
           key: "outline",
