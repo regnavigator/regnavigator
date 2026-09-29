@@ -1,0 +1,26 @@
+{"text": "환자 주민번호는 900101-1234567 입니다", "expect": ["rrn"]}
+{"text": "연락처 010-1234-5678 로 전화주세요", "expect": ["phone"]}
+{"text": "사무실 유선 02-123-4567 입니다", "expect": ["phone"]}
+{"text": "이메일 hong.gildong@example.com 로 회신 바랍니다", "expect": ["email"]}
+{"text": "카드번호 1234-5678-9012-3456 결제", "expect": ["card"]}
+{"text": "사업자등록번호 123-45-67890 확인", "expect": ["biz_reg"]}
+{"text": "서버 IP 192.168.10.25 접속 로그", "expect": ["ip"]}
+{"text": "차량 12가3456 주차 위반", "expect": ["license_plate"]}
+{"text": "여권번호 M12345678 로 출국", "expect": ["passport"]}
+{"text": "지갑 0xabcdef0123456789abcdef0123456789abcdef01 로 송금", "expect": ["crypto"]}
+{"text": "환자 홍길동, 주민번호 850505-2345678, 연락처 010-9876-5432", "expect": ["rrn", "phone"], "ner_expect": ["이름"]}
+{"text": "김영희 님 서울특별시 강남구 테헤란로 152 거주", "expect": [], "ner_expect": ["이름", "주소"]}
+{"text": "담당 간호사 박철수, 사번은 EMP-4471", "expect": [], "ner_expect": ["이름"]}
+{"text": "생년월일 1978년 3월 14일", "expect": ["dob"], "ner_expect": []}
+{"text": "의료기기법 제25조 제2항에 따라 광고 사전심의 대상", "expect": [], "ner_expect": []}
+{"text": "2026-07-01 시행, 과태료 500만원 부과 기준 문의", "expect": [], "ner_expect": []}
+{"text": "식품의약품안전처 고시 제2026-3호 별표 2 서식 확인", "expect": [], "ner_expect": []}
+{"text": "체외진단의료기기법 제11조 허가 절차와 제21조 벌칙", "expect": [], "ner_expect": []}
+{"text": "담당 의사와 상담 후 처방받은 약의 부작용 문의", "expect": [], "ner_expect": []}
+{"text": "환자 본인이 직접 신청해야 하는 서류 종류", "expect": [], "ner_expect": []}
+{"text": "제조업자와 수입업자의 허가 요건 차이", "expect": [], "ner_expect": []}
+{"text": "담당의 김영수, 환자 이순신씨 내원 기록", "expect": [], "ner_expect": ["이름", "이름"]}
+{"text": "제 사무실은 서울 성동구 성수이로 113-1 3층입니다", "expect": [], "ner_expect": ["주소"]}
+{"text": "안녕하세요 최다온입니다. 임상시험 절차 문의드립니다", "expect": [], "ner_expect": ["이름"]}
+{"text": "저는 독고영재라고 합니다. 2등급 인증 문의요", "expect": [], "ner_expect": ["이름"]}
+{"text": "저는 신입입니다. 회의로 5명이 GMP 심사를 준비 중이에요", "expect": [], "ner_expect": []}

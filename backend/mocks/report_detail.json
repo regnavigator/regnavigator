@@ -1,0 +1,16 @@
+{
+  "id": "rep_final_xyz789",
+  "thread_id": "thread_abc123",
+  "mode": "deep",
+  "kind": "final",
+  "status": "done",
+  "title": "의료기기 광고 사전심의 절차",
+  "summary": "의료기기를 광고하려면 식약처 정한 절차에 따라 사전심의를 받아야 한다. 자율심의기구에 신청서·허가증·광고 내용·입증 자료를 제출하며, 승인 시 유효기간은 3년. 위반 시 의료기기법 제52조에 따라 3년 이하 징역 또는 3천만원 이하 벌금.",
+  "blob_uri": "local:///reports_blobs/thread_abc123/rep_final_xyz789.md",
+  "citations_json": "[{\"id\":\"cite_doc_law25\",\"number\":1,\"title\":\"의료기기법 제25조\"}]",
+  "run_id": "run_deep_001",
+  "created_at": "2026-05-06T15:30:00.000Z",
+  "completed_at": "2026-05-06T15:34:21.000Z",
+  "error_message": null,
+  "download_url": "https://storage.googleapis.com/medi-reports-mock/rep_final_xyz789.md?Signed-URL=mock"
+}

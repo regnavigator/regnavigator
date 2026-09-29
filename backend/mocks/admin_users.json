@@ -1,0 +1,68 @@
+{
+  "count": 3,
+  "users": [
+    {
+      "id": "user_admin_001",
+      "email": "admin@example.com",
+      "is_admin": true,
+      "email_verified_at": "2026-04-29T10:00:00.000Z",
+      "daily_token_limit_override": null,
+      "monthly_token_limit_override": null,
+      "effective_daily_limit": 100000,
+      "effective_monthly_limit": 2000000,
+      "created_at": "2026-04-29T10:00:00.000Z",
+      "usage": {
+        "daily_input_tokens": 28888,
+        "daily_output_tokens": 4521,
+        "daily_total_tokens": 33409,
+        "daily_cost_usd": 0.142,
+        "monthly_input_tokens": 388880,
+        "monthly_output_tokens": 67213,
+        "monthly_total_tokens": 456093,
+        "monthly_cost_usd": 1.832
+      }
+    },
+    {
+      "id": "user_test_001",
+      "email": "test1@example.com",
+      "is_admin": false,
+      "email_verified_at": "2026-05-01T13:00:00.000Z",
+      "daily_token_limit_override": null,
+      "monthly_token_limit_override": null,
+      "effective_daily_limit": 100000,
+      "effective_monthly_limit": 2000000,
+      "created_at": "2026-05-01T13:00:00.000Z",
+      "usage": {
+        "daily_input_tokens": 12500,
+        "daily_output_tokens": 2100,
+        "daily_total_tokens": 14600,
+        "daily_cost_usd": 0.062,
+        "monthly_input_tokens": 145000,
+        "monthly_output_tokens": 24300,
+        "monthly_total_tokens": 169300,
+        "monthly_cost_usd": 0.681
+      }
+    },
+    {
+      "id": "user_test_002",
+      "email": "test2@example.com",
+      "is_admin": false,
+      "email_verified_at": null,
+      "daily_token_limit_override": 50000,
+      "monthly_token_limit_override": null,
+      "effective_daily_limit": 50000,
+      "effective_monthly_limit": 2000000,
+      "created_at": "2026-05-04T08:30:00.000Z",
+      "usage": {
+        "daily_input_tokens": 0,
+        "daily_output_tokens": 0,
+        "daily_total_tokens": 0,
+        "daily_cost_usd": 0.0,
+        "monthly_input_tokens": 5200,
+        "monthly_output_tokens": 800,
+        "monthly_total_tokens": 6000,
+        "monthly_cost_usd": 0.024
+      }
+    }
+  ]
+}

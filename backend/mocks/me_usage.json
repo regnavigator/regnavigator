@@ -1,0 +1,17 @@
+{
+  "user_id": "user_admin_001",
+  "email": "admin@example.com",
+  "is_admin": true,
+  "effective_daily_limit": 100000,
+  "effective_monthly_limit": 2000000,
+  "usage": {
+    "daily_input_tokens": 28888,
+    "daily_output_tokens": 4521,
+    "daily_total_tokens": 33409,
+    "daily_cost_usd": 0.142,
+    "monthly_input_tokens": 388880,
+    "monthly_output_tokens": 67213,
+    "monthly_total_tokens": 456093,
+    "monthly_cost_usd": 1.832
+  }
+}

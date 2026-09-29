@@ -1,0 +1,51 @@
+{
+  "thread_id": "thread_abc123",
+  "count": 3,
+  "reports": [
+    {
+      "id": "rep_final_xyz789",
+      "thread_id": "thread_abc123",
+      "mode": "deep",
+      "kind": "final",
+      "status": "done",
+      "title": "의료기기 광고 사전심의 절차",
+      "summary": "의료기기를 광고하려면 식약처 정한 절차에 따라 사전심의를 받아야 한다. 자율심의기구에 신청서·허가증·광고 내용·입증 자료를 제출하며, 승인 시 유효기간은 3년. 위반 시 의료기기법 제52조에 따라 3년 이하 징역 또는 3천만원 이하 벌금.",
+      "blob_uri": "local:///reports_blobs/thread_abc123/rep_final_xyz789.md",
+      "citations_json": "[{\"id\":\"cite_doc_law25\",\"number\":1,\"title\":\"의료기기법 제25조\"},{\"id\":\"cite_doc_self_review\",\"number\":2,\"title\":\"의료기기 광고 자율심의 통합기준 제5장\"}]",
+      "run_id": "run_deep_001",
+      "created_at": "2026-05-06T15:30:00.000Z",
+      "completed_at": "2026-05-06T15:34:21.000Z",
+      "error_message": null
+    },
+    {
+      "id": "rep_rag_def456",
+      "thread_id": "thread_abc123",
+      "mode": "deep",
+      "kind": "rag",
+      "status": "done",
+      "title": "rag_report",
+      "summary": null,
+      "blob_uri": "local:///reports_blobs/thread_abc123/rep_rag_def456.md",
+      "citations_json": null,
+      "run_id": "run_deep_001",
+      "created_at": "2026-05-06T15:32:40.000Z",
+      "completed_at": "2026-05-06T15:33:00.000Z",
+      "error_message": null
+    },
+    {
+      "id": "rep_web_abc123",
+      "thread_id": "thread_abc123",
+      "mode": "deep",
+      "kind": "web",
+      "status": "done",
+      "title": "web_report",
+      "summary": null,
+      "blob_uri": "local:///reports_blobs/thread_abc123/rep_web_abc123.md",
+      "citations_json": null,
+      "run_id": "run_deep_001",
+      "created_at": "2026-05-06T15:31:50.000Z",
+      "completed_at": "2026-05-06T15:32:09.000Z",
+      "error_message": null
+    }
+  ]
+}
