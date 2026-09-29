@@ -1,0 +1,38 @@
+/* Material Symbols Outlined — 구글 폰트 CSS 를 로컬로 가져온 것(2026-09-08).
+ *
+ * 왜 <link> 가 아니라 여기인가: 구글 CSS 의 .material-symbols-outlined 규칙(display:
+ * inline-block, font-size:24px)은 cascade layer 밖이라 Tailwind v4 의 레이어 유틸리티
+ * (inline-flex·text-[20px]·items-center)를 항상 이겼다. 그래서 flex 항목인 아이콘 타일이
+ * block 으로 바뀌어 글리프가 구석에 놓이고(첫 화면 예시 목록), 크기 유틸리티도 무시됐다.
+ * 클래스 규칙을 @layer base 안에 두면 유틸리티가 이긴다. @font-face 는 레이어 무관.
+ *
+ * 폰트 URL 은 구글이 준 값 그대로(fonts.gstatic 정적 파일, 버전 v369). 변형 축은
+ * opsz 20..48 · wght 300..700 · FILL 0..1 · GRAD -25..200.
+ */
+@font-face {
+  font-family: 'Material Symbols Outlined';
+  font-style: normal;
+  font-weight: 300 700;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/materialsymbolsoutlined/v369/kJEhBvYX7BgnkSrUwT8OhrdQw4oELdPIeeII9v6oFsI.woff2) format('woff2');
+}
+
+@layer base {
+  .material-symbols-outlined {
+    font-family: 'Material Symbols Outlined';
+    font-weight: normal;
+    font-style: normal;
+    font-size: 24px;
+    line-height: 1;
+    letter-spacing: normal;
+    text-transform: none;
+    display: inline-block;
+    vertical-align: middle;
+    white-space: nowrap;
+    word-wrap: normal;
+    direction: ltr;
+    -webkit-font-feature-settings: 'liga';
+    font-feature-settings: 'liga';
+    -webkit-font-smoothing: antialiased;
+  }
+}

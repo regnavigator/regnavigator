@@ -1,0 +1,1186 @@
+@import "tailwindcss";
+/* Material Symbols 폰트 — 로컬 파일(@font-face + base 레이어 클래스 규칙). 원격 @import 는
+   Tailwind 빌드가 파일 중간으로 밀어 무효가 됐고, <link> 는 레이어 밖이라 유틸리티를 덮었다. */
+@import "./material-symbols.css";
+
+/* =============================================================================
+ * P1.1 — Material 라이트 토큰 (01_COLOR §2.1–§2.5)
+ * raw hex는 본 파일 내에서만 허용. 다른 src/** 코드에선 var(--md-*) 또는 매핑된
+ * Tailwind 클래스(bg-md-primary 등)만 사용한다.
+ * ========================================================================== */
+:root {
+  /* §1.1 Primary — Quiet Emerald #0F6B4A (MEDIREG AI 주액션·헤딩)
+   * 채도 낮춰 의료 도메인 차분한 톤. primary-fixed-dim = Sage Active #3F8B6E
+   * (primary보다 밝은 sage — running step·AI 응답 active 강조).
+   * inverse-primary = Deep Forest #1D3D33 (다크 배경 위 강조용). */
+  --md-primary: #0F6B4A;
+  --md-on-primary: #FFFFFF;
+  --md-primary-container: #0A553B;
+  --md-on-primary-container: #ECFDF5;
+  --md-primary-fixed: #DCEAE3;
+  --md-primary-fixed-dim: #3F8B6E;
+  --md-on-primary-fixed: #0B1F17;
+  --md-on-primary-fixed-variant: #0F6B4A;
+  --md-inverse-primary: #1D3D33;
+  --md-surface-tint: #0F6B4A;
+
+  /* §1.2 Secondary — Regulatory Indigo #3B5BA9 (법정 고시·보험 급여 인용)
+   * 채도 ↓ — primary와 충돌 없이 부조 강조. */
+  --md-secondary: #3B5BA9;
+  --md-on-secondary: #FFFFFF;
+  --md-secondary-container: #2E4B92;
+  --md-secondary-fixed: #DDE5F5;
+  --md-secondary-fixed-dim: #93A8D9;
+  --md-on-secondary-fixed: #0F172A;
+  --md-on-secondary-fixed-variant: #3B5BA9;
+
+  /* §1.3 Tertiary — Olive Gold #A16207 (warning · 임상 주의)
+   * 그린 primary와 친화되는 olive 톤. */
+  --md-tertiary: #A16207;
+  --md-on-tertiary: #FFFFFF;
+  --md-tertiary-container: #854D0E;
+  --md-on-tertiary-container: #FFFFFF;
+  --md-tertiary-fixed: #FEF3C7;
+  --md-tertiary-fixed-dim: #EAB308;
+  --md-on-tertiary-fixed: #451A03;
+  --md-on-tertiary-fixed-variant: #78350F;
+
+  /* §1.4 Surface — 옅은 off-white forest tint + 차분한 forest gray 계단.
+   * surface(메인 페이지)는 살짝 forest tint, surface-bright/lowest(카드 강조)는
+   * 순백색으로 두어 입체감 유지. */
+  --md-surface: #F7FAF8;
+  --md-surface-dim: #B5C7BC;
+  --md-surface-bright: #FFFFFF;
+  --md-surface-container-lowest: #FFFFFF;
+  --md-surface-container-low: #E8F0EA;
+  --md-surface-container: #DCE6DF;
+  --md-surface-container-high: #C9D7CD;
+  --md-surface-container-highest: #B5C7BC;
+  --md-surface-variant: #ECF2EE;
+
+  /* §1.5 텍스트·outline — Deep Forest Ink / Forest-tinted Slate / Forest Gray
+   * 같은 hue family로 통일해 surface와 톤 일치. */
+  --md-on-surface: #0B1F17;
+  /* 본문 볼드(강조) 전용 — 라이트는 본문색 그대로, 다크는 밝은 민트로 분리
+   * (다크에서 볼드가 본문과 동일색이라 묻힘 — 사용자 피드백 2026-07-16) */
+  --md-strong: var(--md-on-surface);
+  --md-on-surface-variant: #4A6B5E;
+  --md-on-background: #0B1F17;
+  --md-outline: #C5D4CC;
+  --md-outline-variant: #C9D7CD;   /* 카드 경계 가시성 — 기존 #DCE6DF 는 surface-container 와 동일값이라 테두리가 안 보였음 */
+  --md-inverse-surface: #0B1F17;
+  --md-inverse-on-surface: #FFFFFF;
+
+  /* §1.6 Error — Crimson #B91C1C (desat — quiet forest와 톤 정합) */
+  --md-error: #B91C1C;
+  --md-on-error: #FFFFFF;
+  --md-error-container: #FEE2E2;
+  --md-on-error-container: #7F1D1D;
+
+  /* P1.3 — 시맨틱 별칭 (01 §2)
+   * success: Deep Emerald #047857 — primary와 *별도* 보존 (의미 분리).
+   *          검증·완료된 출처·CNUHH 내부 데이터 표시.
+   * info:    Regulatory Indigo(secondary) — 법정 인용·정보.
+   * warning: Olive Gold(tertiary) — 주의·임상 경고.
+   * revoked: Crimson(error) — 폐기·오류·금기. */
+  --md-success: #047857;
+  --md-warning: var(--md-tertiary);
+  --md-info: var(--md-secondary);
+  --md-revoked: var(--md-error);
+
+  /* P1.4 — 모션 토큰 (04 §3.2) */
+  --motion-instant: 0ms;
+  --motion-fast: 120ms;
+  --motion-base: 200ms;
+  --motion-slow: 300ms;
+  --motion-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+
+  /* 그림자 (01 §5) */
+  --shadow-popover: 0 4px 12px rgba(0, 0, 0, 0.05);
+  --shadow-card-active: 0 2px 6px rgba(0, 0, 0, 0.05);
+
+  /* shadcn HSL 매핑 (01 §4) — Quiet Forest Suite 정합 */
+  --background: 138 18% 97%;          /* #F7FAF8 off-white forest tint */
+  --foreground: 154 47% 9%;           /* #0B1F17 deep forest ink */
+  --card: 0 0% 100%;
+  --card-foreground: 154 47% 9%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 154 47% 9%;
+  --primary: 156 76% 24%;             /* #0F6B4A quiet emerald */
+  --primary-foreground: 0 0% 100%;
+  --secondary: 222 48% 45%;           /* #3B5BA9 regulatory indigo */
+  --secondary-foreground: 0 0% 100%;
+  --muted: 138 17% 94%;               /* #ECF2EE surface-variant */
+  --muted-foreground: 152 18% 36%;    /* #4A6B5E forest-tinted slate */
+  --accent: 138 16% 82%;              /* #C9D7CD surface-container-high */
+  --accent-foreground: 154 47% 9%;
+  --destructive: 0 74% 42%;           /* #B91C1C crimson desat */
+  --destructive-foreground: 0 0% 100%;
+  --border: 138 18% 80%;              /* #C5D4CC forest gray */
+  --input: 138 18% 80%;
+  --ring: 156 76% 24%;                /* quiet emerald focus ring */
+  --sidebar: 138 18% 93%;             /* #E8F0EA forest tinted gray */
+  --radius: 0.5rem;
+}
+
+/* =============================================================================
+ * P1.2 — Tailwind v4 @theme (01 §7.2)
+ * Material 토큰을 Tailwind 색 별칭으로, shadcn HSL을 호환 별칭으로 매핑.
+ * 모션·타이포 토큰도 여기서 노출.
+ * ========================================================================== */
+@theme {
+  /* Material color aliases (bg-md-primary, text-md-on-surface, etc.) */
+  --color-md-primary: var(--md-primary);
+  --color-md-on-primary: var(--md-on-primary);
+  --color-md-primary-container: var(--md-primary-container);
+  --color-md-on-primary-container: var(--md-on-primary-container);
+  --color-md-primary-fixed: var(--md-primary-fixed);
+  --color-md-primary-fixed-dim: var(--md-primary-fixed-dim);
+  --color-md-on-primary-fixed: var(--md-on-primary-fixed);
+  --color-md-on-primary-fixed-variant: var(--md-on-primary-fixed-variant);
+  --color-md-inverse-primary: var(--md-inverse-primary);
+  --color-md-surface-tint: var(--md-surface-tint);
+
+  --color-md-secondary: var(--md-secondary);
+  --color-md-on-secondary: var(--md-on-secondary);
+  --color-md-secondary-container: var(--md-secondary-container);
+  --color-md-secondary-fixed: var(--md-secondary-fixed);
+  --color-md-secondary-fixed-dim: var(--md-secondary-fixed-dim);
+  --color-md-on-secondary-fixed: var(--md-on-secondary-fixed);
+  --color-md-on-secondary-fixed-variant: var(--md-on-secondary-fixed-variant);
+
+  --color-md-tertiary: var(--md-tertiary);
+  --color-md-on-tertiary: var(--md-on-tertiary);
+  --color-md-tertiary-fixed: var(--md-tertiary-fixed);
+  --color-md-tertiary-fixed-dim: var(--md-tertiary-fixed-dim);
+
+  --color-md-surface: var(--md-surface);
+  --color-md-surface-dim: var(--md-surface-dim);
+  --color-md-surface-bright: var(--md-surface-bright);
+  --color-md-surface-container-lowest: var(--md-surface-container-lowest);
+  --color-md-surface-container-low: var(--md-surface-container-low);
+  --color-md-surface-container: var(--md-surface-container);
+  --color-md-surface-container-high: var(--md-surface-container-high);
+  --color-md-surface-container-highest: var(--md-surface-container-highest);
+  --color-md-surface-variant: var(--md-surface-variant);
+
+  --color-md-on-surface: var(--md-on-surface);
+  --color-md-on-surface-variant: var(--md-on-surface-variant);
+  --color-md-on-background: var(--md-on-background);
+  --color-md-outline: var(--md-outline);
+  --color-md-outline-variant: var(--md-outline-variant);
+  --color-md-inverse-surface: var(--md-inverse-surface);
+  --color-md-inverse-on-surface: var(--md-inverse-on-surface);
+
+  --color-md-error: var(--md-error);
+  --color-md-on-error: var(--md-on-error);
+  --color-md-error-container: var(--md-error-container);
+  --color-md-on-error-container: var(--md-on-error-container);
+
+  /* P1.3 시맨틱 별칭 클래스 (bg-md-success 등) */
+  --color-md-success: var(--md-success);
+  --color-md-warning: var(--md-warning);
+  --color-md-info: var(--md-info);
+  --color-md-revoked: var(--md-revoked);
+
+  /* shadcn HSL 호환 — 기존 shadcn 컴포넌트가 var(--*) hsl 표기를 쓰므로 별칭 정의 */
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-sidebar: hsl(var(--sidebar));
+
+  /* 폰트 (04 §1.1)
+   * Basic 테마에서도 Sora를 우선시켜 영문/숫자는 Sora로, 한글은 Pretendard로 자연 fallback.
+   * JetBrains Mono는 mono(코드/숫자 인덱스) 전용. */
+  --font-sans:
+    "Sora", "Pretendard Variable", var(--font-inter), system-ui, -apple-system, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), "JetBrains Mono", ui-monospace, "SF Mono", monospace;
+
+  /* 스페이싱 토큰 (02 §8) */
+  --spacing-unit: 4px;
+  --spacing-gutter: 16px;
+  --spacing-card-padding: 20px;
+  --spacing-margin-container: 32px;
+  --spacing-stack-gap: 12px;
+
+  /* 라운드 (02 §10) */
+  --radius-card: 8px;
+  --radius-input: 12px;
+  --radius-button: 8px;
+  --radius-pill: 6px;   /* 2026-09-07: 알약 배지 → 사각 태그(토스·OpenAI 톤). 원형 버튼은 rounded-full 로 별도 */
+}
+
+/* =============================================================================
+ * P1.5 — 타이포 utility 클래스 (04 §1.2)
+ * `text-h1`, `text-h2`, `text-body-base`, `text-body-sm`, `text-code`,
+ * `text-label-caps`. 새 사이즈 신규 추가 X — 본 클래스 외 font-size 직접 작성 금지.
+ * ========================================================================== */
+@layer utilities {
+  .text-h1 {
+    font-size: 24px;
+    font-weight: 600;
+    line-height: 32px;
+    letter-spacing: -0.012em;
+  }
+  .text-h2 {
+    font-size: 18px;
+    font-weight: 600;
+    line-height: 26px;
+    letter-spacing: -0.006em;
+  }
+  /* body 본문 — 표준 16px, 1.65 line-height */
+  .text-body-base {
+    font-size: 16px;
+    font-weight: 400;
+    line-height: 1.65;
+    letter-spacing: -0.003em;
+  }
+  .text-body-sm {
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 1.55;
+    letter-spacing: 0;
+  }
+  .text-code {
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 1.55;
+    font-family: var(--font-mono);
+    letter-spacing: -0.005em;
+  }
+  .text-label-caps {
+    font-size: 11.5px;
+    font-weight: 600;
+    line-height: 16px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+}
+
+/* body 전체에 font-feature settings — 가독성 ↑.
+ * font-family는 :root --font-sans 토큰을 *명시*하여 Tailwind 빌드 캐시·HMR 누락에도
+ * 즉시 반영되도록 한다 (Sora 우선, Pretendard 한글 fallback).
+ * font-size는 세 테마(emerald·forest·indigo) 통일을 위해 명시 16px 박음 —
+ * 브라우저 root size 변동·cascade 우선순위 문제 차단. */
+html, body {
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.5;
+  letter-spacing: -0.005em;
+  font-feature-settings: "ss01" on, "cv11" on, "ss03" on, "cv01" on;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* =============================================================================
+ * P1.10 — 글로벌 포커스 링 (04 §5)
+ * outline 2px solid --md-primary, offset 2px. 모든 키보드 진입 가능 요소에 적용.
+ * ========================================================================== */
+@layer base {
+  html,
+  body {
+    background-color: var(--md-surface);
+    color: var(--md-on-surface);
+  }
+
+  /* Chrome autofill 기본 연한 파란색 배경 제거 — surface 토큰 적용 */
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus,
+  input:-webkit-autofill:active,
+  textarea:-webkit-autofill,
+  textarea:-webkit-autofill:hover,
+  textarea:-webkit-autofill:focus,
+  select:-webkit-autofill {
+    -webkit-box-shadow: 0 0 0 1000px var(--md-surface) inset !important;
+    -webkit-text-fill-color: var(--md-on-surface) !important;
+    caret-color: var(--md-on-surface);
+    transition: background-color 5000s ease-in-out 0s;
+  }
+
+  *:focus-visible {
+    outline: 2px solid var(--md-primary);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  /* Material Symbols Outlined 기본 변형 (04 §2.2) */
+  .material-symbols-outlined {
+    font-variation-settings:
+      "FILL" 0,
+      "wght" 400,
+      "GRAD" 0,
+      "opsz" 20;
+    user-select: none;
+    /* 2026-09-08 "span 안 그림 정렬이 안 맞는다": 아이콘 글리프가 본문 line-height 를
+       상속해 위로 떠 보였다. 자체 줄높이 1 + 중앙 정렬로 어떤 글자 옆에 와도 가운데. */
+    line-height: 1;
+    vertical-align: middle;
+    /* display 는 지정하지 않는다 — inline-block 을 박았더니 아이콘 타일(inline-flex
+       size-9 items-center)의 중앙 정렬을 덮어써 글리프가 구석으로 밀렸다(새 대화 첫 화면). */
+  }
+}
+
+/* =============================================================================
+ * P1.9 — reduced-motion (04 §3.1)
+ * OS 설정이 reduce일 때 모든 transition·animation 정지.
+ * ========================================================================== */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* =============================================================================
+ * 진행 dot pulse (04 §3.3) — 1.6s ease-in-out infinite, opacity 1↔0.4
+ * StepCard 등에서 `animate-md-pulse` 클래스로 사용.
+ * reduced-motion에서는 위 미디어 쿼리에 의해 자동 정지.
+ * ========================================================================== */
+@keyframes md-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+/* =============================================================================
+ * 진행 typing dots — "···" 시차 펄스. 검색·작성 중 시각 신호.
+ * ========================================================================== */
+@keyframes md-typing-dot {
+  0%, 80%, 100% { opacity: 0.2; transform: translateY(0); }
+  40% { opacity: 1; transform: translateY(-1px); }
+}
+
+/* =============================================================================
+ * 답변 스트리밍 caret — 텍스트 끝 "▍" 깜빡임.
+ * ========================================================================== */
+@keyframes md-caret-blink {
+  0%, 50% { opacity: 1; }
+  50.01%, 100% { opacity: 0; }
+}
+
+/* =============================================================================
+ * 진행 중 카드 보더 — running step 컨테이너 강조 (subtle border pulse).
+ * ========================================================================== */
+@keyframes md-border-pulse {
+  0%, 100% { border-color: var(--md-outline-variant); }
+  50% { border-color: var(--md-primary); }
+}
+
+/* =============================================================================
+ * Spinner — 응답 대기 시 회전. SVG 또는 border 트릭 둘 다 사용 가능.
+ * ========================================================================== */
+@keyframes md-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* =============================================================================
+ * Shimmer (텍스트 물결) — 대기 중 텍스트에 좌→우 빛 흐름.
+ * background-clip: text + 움직이는 그라데이션.
+ * ========================================================================== */
+@keyframes md-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* =============================================================================
+ * Progress slide — 보고서 진행바. 좌→우 무한 슬라이드.
+ * ========================================================================== */
+@keyframes md-progress-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+
+/* =============================================================================
+ * Panel slide — 좌측/우측 사이드 패널 열기/닫기 애니메이션.
+ * 화면 *바깥*에서 슬라이드 인 → 진짜 슬라이딩 시각. cubic-bezier로 자연스러운 ease.
+ * ========================================================================== */
+/* 라이브 검색 결과 카드·보고서 목차 등 — 항목이 한 건씩 도착할 때 부드러운 등장 */
+@keyframes md-fade-in {
+  from { opacity: 0; transform: translateY(2px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes md-panel-in-left {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+@keyframes md-panel-out-left {
+  from { transform: translateX(0); }
+  to { transform: translateX(-100%); }
+}
+@keyframes md-panel-in-right {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+@keyframes md-panel-out-right {
+  from { transform: translateX(0); }
+  to { transform: translateX(100%); }
+}
+
+/* =============================================================================
+ * Citation cross-highlight pulse — References 항목 클릭 시 본문 해당 칩이
+ * 짧게 강조됐다 사라짐. (CiteHighlightContext.scrollTo)
+ * reduced-motion에서는 상단 미디어 쿼리로 자동 정지.
+ * ========================================================================== */
+@keyframes cite-pulse {
+  0% { background-color: var(--md-primary-container); }
+  100% { background-color: transparent; }
+}
+
+@layer utilities {
+  .cite-pulse {
+    animation: cite-pulse 1.2s ease-out;
+    border-radius: 3px;
+  }
+  .animate-md-pulse {
+    animation: md-pulse 1.6s ease-in-out infinite;
+  }
+  .animate-md-typing-dot {
+    animation: md-typing-dot 1.2s ease-in-out infinite both;
+  }
+  .animate-md-caret {
+    animation: md-caret-blink 1s step-end infinite;
+  }
+  .animate-md-border-pulse {
+    animation: md-border-pulse 2s ease-in-out infinite;
+  }
+  .animate-md-spin {
+    animation: md-spin 0.9s linear infinite;
+  }
+  .animate-md-fade-in {
+    animation: md-fade-in 240ms ease-out both;
+  }
+  /* cubic-bezier(0.32, 0.72, 0, 1) — Apple 스타일 부드러운 ease (sliding panel 표준) */
+  .animate-md-panel-in-left {
+    animation: md-panel-in-left 280ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  .animate-md-panel-out-left {
+    animation: md-panel-out-left 240ms cubic-bezier(0.32, 0.72, 0, 1) forwards;
+  }
+  .animate-md-panel-in-right {
+    animation: md-panel-in-right 280ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  .animate-md-panel-out-right {
+    animation: md-panel-out-right 240ms cubic-bezier(0.32, 0.72, 0, 1) forwards;
+  }
+  .animate-md-shimmer {
+    background: linear-gradient(
+      90deg,
+      var(--md-on-surface-variant) 0%,
+      var(--md-on-surface-variant) 40%,
+      var(--md-primary) 50%,
+      var(--md-on-surface-variant) 60%,
+      var(--md-on-surface-variant) 100%
+    );
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+    animation: md-shimmer 2.4s linear infinite;
+  }
+  .animate-md-progress-slide {
+    animation: md-progress-slide 1.6s ease-in-out infinite;
+  }
+}
+
+/* =============================================================================
+ * Sonner Toaster — chat column 중앙 정렬.
+ * PageShell이 ResizeObserver로 chat column의 center X를 `--toast-x` 박는다.
+ * 미설정 시 viewport center(50%) fallback.
+ * ========================================================================== */
+[data-sonner-toaster][data-position*="bottom"] {
+  left: var(--toast-x, 50%) !important;
+  right: auto !important;
+  transform: translateX(-50%) !important;
+}
+
+/* 토스트 너비 — sonner 기본 356px 는 한국어 경고 문구(첨부 거절·잘림 고지 등)가
+ * 3~4줄로 꺾여 불안정하게 보인다. 넉넉히 고정(2026-08-05). 모바일은 화면폭 안쪽. */
+[data-sonner-toaster] {
+  --width: 480px !important;
+}
+@media (max-width: 560px) {
+  [data-sonner-toaster] {
+    --width: calc(100vw - 32px) !important;
+  }
+}
+
+/* =============================================================================
+ * Medra Design Tokens — design_guide.md.
+ * 기존 --md-* 토큰과 별도 namespace (--medra-*). landing/marketing 페이지 전용.
+ * Sora + JetBrains Mono 폰트는 layout.tsx에서 로드.
+ * ========================================================================== */
+:root {
+  --medra-bg:           #F4F2ED;
+  --medra-bg2:          #ECEAE3;
+  --medra-ink:          #1A1916;
+  --medra-ink2:         #5A5850;
+  --medra-ink3:         #9A9890;
+  --medra-accent:       #1D4D3A;
+  --medra-accent-light: #2D7A5C;
+  --medra-accent-pale:  #DFF0E8;
+  --medra-accent-mid:   #A8D4BE;
+  --medra-gold:         #B8902A;
+  --medra-border:        rgba(26,25,22,0.12);
+  --medra-border-strong: rgba(26,25,22,0.22);
+  --medra-r:    4px;
+  --medra-r-lg: 12px;
+}
+
+/* medra 페이지 root 스코프 — `.medra-root` 클래스 박은 영역에서만 적용.
+ * 폰트는 :root --font-sans 토큰 사용 (세 테마 통일). */
+.medra-root {
+  background: var(--medra-bg);
+  color: var(--medra-ink);
+  font-family: var(--font-sans);
+}
+
+/* =============================================================================
+ * Theme: Medra Override — [data-theme="medra"] 스코프에서 --md-* 토큰 swap.
+ * 기존 brand palette는 default. 사이드바 ThemeToggle에서 토글 가능.
+ * ========================================================================== */
+[data-theme="medra"] {
+  /* 폰트는 :root --font-sans 토큰 그대로 inherit (세 테마 통일). */
+
+  /* surface — 가이드 색 그대로 (#F4F2ED 웜 아이보리) */
+  --md-surface: #F4F2ED;
+  --md-surface-bright: #F4F2ED;
+  --md-surface-container-lowest: #F4F2ED;
+  --md-surface-container-low: #ECEAE3;
+  --md-surface-container: #E5E3DA;
+  --md-surface-container-high: #DFDDD2;
+  --md-surface-container-highest: #D8D6CB;
+  --md-surface-variant: #DFDDD2;
+
+  /* 본문 — 짙은 잉크 */
+  --md-on-surface: #1A1916;
+  --md-on-surface-variant: #5A5850;
+  --md-on-background: #1A1916;
+  --md-outline: rgba(26, 25, 22, 0.22);
+  --md-outline-variant: rgba(26, 25, 22, 0.18);   /* 카드 경계 강화(기존 0.12 너무 옅음) */
+
+  /* primary — 포레스트 그린 */
+  --md-primary: #1D4D3A;
+  --md-on-primary: #FFFFFF;
+  --md-primary-container: #2D7A5C;
+  --md-on-primary-container: #F0FFF7;
+  --md-primary-fixed: #DFF0E8;
+  --md-primary-fixed-dim: #A8D4BE;
+  --md-on-primary-fixed: #0F2A1F;
+  --md-on-primary-fixed-variant: #1D4D3A;
+  --md-inverse-primary: #A8D4BE;
+  --md-surface-tint: #1D4D3A;
+
+  /* secondary — medra엔 없으니 accent-mid 톤으로 약하게 (기존 secondary 위치 유지) */
+  --md-secondary: #2D7A5C;
+  --md-on-secondary: #FFFFFF;
+  --md-secondary-container: #1D4D3A;
+  --md-secondary-fixed: #DFF0E8;
+  --md-secondary-fixed-dim: #A8D4BE;
+  --md-on-secondary-fixed: #0F2A1F;
+  --md-on-secondary-fixed-variant: #1D4D3A;
+
+  /* tertiary — gold 그대로 (medra gold #B8902A) */
+  --md-tertiary: #B8902A;
+  --md-tertiary-container: #8B6E1F;
+  --md-tertiary-fixed: #F5EDD4;
+  --md-tertiary-fixed-dim: #E0CC8E;
+  --md-on-tertiary-fixed: #3A2D00;
+  --md-on-tertiary-fixed-variant: #6B5210;
+
+  /* error — medra 톤(어두운 빨강) */
+  --md-error: #C0392B;
+  --md-on-error: #FFFFFF;
+  --md-error-container: #F8E1DC;
+  --md-on-error-container: #4A100A;
+
+  /* 메인 컨테이너에 명시 적용 — Tailwind cache·third-party panel 등 토큰 swap 안 따라가는 경우 보강 */
+  background: var(--md-surface) !important;
+}
+
+/* =============================================================================
+ * Theme: Regia — Stripe-inspired purple/blue/cyan 그라데이션 톤.
+ * 출처: regia_landing_page.html. 디자인 가이드: .claude/skills/medi-front-theme-regia/
+ * ========================================================================== */
+[data-theme="regia"] {
+  /* 폰트는 :root --font-sans 토큰 그대로 inherit (세 테마 통일). */
+
+  /* surface — 흰색 + 옅은 라일락/파스텔 계단 */
+  --md-surface: #FFFFFF;
+  --md-surface-bright: #FFFFFF;
+  --md-surface-container-lowest: #FFFFFF;
+  --md-surface-container-low: #F7F8FC;
+  --md-surface-container: #F0F4FF;
+  --md-surface-container-high: #E8EEFB;
+  --md-surface-container-highest: #DCE4F5;
+  --md-surface-variant: #F0F4FF;
+
+  /* 본문 — 짙은 navy ink */
+  --md-on-surface: #0F1729;
+  --md-on-surface-variant: #6B7280;
+  --md-on-background: #0F1729;
+  --md-outline: #D1D5DB;
+  --md-outline-variant: #D9DEE6;   /* 카드 경계 강화(기존 #E5E7EB 너무 옅음) */
+
+  /* primary — 인디고 보라 */
+  --md-primary: #6366F1;
+  --md-on-primary: #FFFFFF;
+  --md-primary-container: #4F46E5;
+  --md-on-primary-container: #F0F2FF;
+  --md-primary-fixed: #EEF2FF;
+  --md-primary-fixed-dim: #818CF8;
+  --md-on-primary-fixed: #1E1B4B;
+  --md-on-primary-fixed-variant: #4F46E5;
+  --md-inverse-primary: #A5B4FC;
+  --md-surface-tint: #6366F1;
+
+  /* secondary — 블루 */
+  --md-secondary: #3B82F6;
+  --md-on-secondary: #FFFFFF;
+  --md-secondary-container: #2563EB;
+  --md-secondary-fixed: #DBEAFE;
+  --md-secondary-fixed-dim: #93C5FD;
+  --md-on-secondary-fixed: #0C1E47;
+  --md-on-secondary-fixed-variant: #2563EB;
+
+  /* tertiary — 시안 */
+  --md-tertiary: #06B6D4;
+  --md-tertiary-container: #0891B2;
+  --md-tertiary-fixed: #CFFAFE;
+  --md-tertiary-fixed-dim: #67E8F9;
+  --md-on-tertiary-fixed: #06363F;
+  --md-on-tertiary-fixed-variant: #0E7490;
+
+  /* error */
+  --md-error: #EF4444;
+  --md-on-error: #FFFFFF;
+  --md-error-container: #FEE2E2;
+  --md-on-error-container: #7F1D1D;
+
+  background: var(--md-surface) !important;
+}
+
+/* =============================================================================
+ * Theme-aware 시그니처 utility — basic·medra·regia 각각 다른 그라데이션·glow.
+ * 컴포넌트는 theme 무관하게 .theme-grad-text 등만 박으면 자동 적용.
+ * ========================================================================== */
+
+/* 헤딩 em·label 그라데이션 — Basic은 forest hue family 안에서만(deep ink → quiet
+   emerald → sage active). secondary(regulatory indigo)는 hue가 멀어 톤 분리됨 → 미사용. */
+.theme-grad-text {
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  background-image: linear-gradient(135deg, var(--md-on-surface) 0%, var(--md-primary) 55%, var(--md-primary-fixed-dim) 100%);
+}
+[data-theme="medra"] .theme-grad-text {
+  background-image: linear-gradient(135deg, var(--md-on-surface) 0%, var(--md-primary) 50%, var(--md-primary-container) 100%);
+}
+[data-theme="regia"] .theme-grad-text {
+  background-image: linear-gradient(135deg, #6366F1 0%, #3B82F6 55%, #06B6D4 100%);
+}
+
+/* primary CTA bg — basic·medra: 단색 var(--md-primary), regia: 그라데이션 */
+.theme-cta-bg {
+  background-color: var(--md-primary);
+}
+[data-theme="regia"] .theme-cta-bg {
+  background-image: linear-gradient(135deg, #6366F1 0%, #3B82F6 60%, #06B6D4 100%);
+}
+
+/* CTA hover glow — theme별 색이 있는 그림자. shadow 전용 utility */
+.theme-cta-glow:hover {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+[data-theme="medra"] .theme-cta-glow:hover {
+  box-shadow: 0 8px 24px rgba(29, 77, 58, 0.25);
+}
+[data-theme="regia"] .theme-cta-glow:hover {
+  box-shadow: 0 8px 32px rgba(99, 102, 241, 0.35);
+}
+
+/* 카드 hover lift — theme별 color tint 보더·그림자 */
+.theme-card-lift {
+  transition: border-color 200ms, transform 200ms, box-shadow 200ms;
+}
+.theme-card-lift:hover {
+  transform: translateY(-3px);
+  border-color: var(--md-primary);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.08);
+}
+[data-theme="regia"] .theme-card-lift:hover {
+  border-color: #818CF8;
+  box-shadow: 0 12px 40px rgba(99, 102, 241, 0.13);
+}
+
+/* 로고 tint — theme별 hue 조정.
+   logo.png가 단색 그린 가정. basic은 그대로, medra는 darker green, regia는 indigo로 hue shift.
+   정식 로고 SVG/별도 파일 박히면 이 filter 제거. */
+.theme-logo {
+  transition: filter 200ms ease;
+}
+[data-theme="medra"] .theme-logo {
+  filter: hue-rotate(-15deg) saturate(0.85) brightness(0.75);
+}
+[data-theme="regia"] .theme-logo {
+  filter: hue-rotate(180deg) saturate(0.9) brightness(0.95);
+}
+
+/* legacy alias — 기존 .regia-grad-* 사용처 호환 */
+.regia-grad-text {
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  background-image: linear-gradient(135deg, #6366F1 0%, #3B82F6 55%, #06B6D4 100%);
+}
+.regia-grad-bg {
+  background-image: linear-gradient(135deg, #6366F1 0%, #3B82F6 60%, #06B6D4 100%);
+}
+
+/* Tailwind v4 @theme이 utility class에 색을 static으로 inline 컴파일 → body 토큰 override가
+   utility까지 안 따라감. 우리가 utility class를 직접 박아 var() 참조 보존 → 자동 cascading.
+   Tailwind 자동 generated보다 source order 후순위라 우리 게 우선 적용 (specificity 같음). */
+@layer utilities {
+  /* surface */
+  .bg-md-surface { background-color: var(--md-surface); }
+  .bg-md-surface-bright { background-color: var(--md-surface-bright); }
+  .bg-md-surface-container-lowest { background-color: var(--md-surface-container-lowest); }
+  .bg-md-surface-container-low { background-color: var(--md-surface-container-low); }
+  .bg-md-surface-container { background-color: var(--md-surface-container); }
+  .bg-md-surface-container-high { background-color: var(--md-surface-container-high); }
+  .bg-md-surface-container-highest { background-color: var(--md-surface-container-highest); }
+  .bg-md-surface-variant { background-color: var(--md-surface-variant); }
+
+  /* on-surface */
+  .text-md-on-surface { color: var(--md-on-surface); }
+  .text-md-on-surface-variant { color: var(--md-on-surface-variant); }
+  .placeholder\:text-md-on-surface-variant::placeholder { color: var(--md-on-surface-variant); }
+
+  /* outline */
+  .border-md-outline { border-color: var(--md-outline); }
+  .border-md-outline-variant { border-color: var(--md-outline-variant); }
+  .divide-md-outline-variant > :not([hidden]) ~ :not([hidden]) { border-color: var(--md-outline-variant); }
+
+  /* primary */
+  .bg-md-primary { background-color: var(--md-primary); }
+  .bg-md-primary-container { background-color: var(--md-primary-container); }
+  .bg-md-primary-fixed { background-color: var(--md-primary-fixed); }
+  .text-md-primary { color: var(--md-primary); }
+  .text-md-on-primary { color: var(--md-on-primary); }
+  .text-md-on-primary-fixed-variant { color: var(--md-on-primary-fixed-variant); }
+  .border-md-primary { border-color: var(--md-primary); }
+  .border-t-md-primary { border-top-color: var(--md-primary); }
+
+  /* secondary */
+  .bg-md-secondary { background-color: var(--md-secondary); }
+  .text-md-secondary { color: var(--md-secondary); }
+  .bg-md-secondary-fixed { background-color: var(--md-secondary-fixed); }
+  .text-md-on-secondary-fixed-variant { color: var(--md-on-secondary-fixed-variant); }
+
+  /* tertiary */
+  .bg-md-tertiary { background-color: var(--md-tertiary); }
+  .text-md-tertiary { color: var(--md-tertiary); }
+  .bg-md-tertiary-fixed { background-color: var(--md-tertiary-fixed); }
+  .text-md-on-tertiary-fixed-variant { color: var(--md-on-tertiary-fixed-variant); }
+
+  /* error */
+  .bg-md-error { background-color: var(--md-error); }
+  .bg-md-error-container { background-color: var(--md-error-container); }
+  .text-md-error { color: var(--md-error); }
+  .text-md-on-error { color: var(--md-on-error); }
+  .text-md-on-error-container { color: var(--md-on-error-container); }
+
+  /* focus / hover modifier — Tailwind generated가 static inline이라 토큰 swap 안 따라감.
+     사용 중인 modifier만 명시 박아 var() cascading 보장. */
+  .focus\:border-md-primary:focus { border-color: var(--md-primary); }
+  .focus-within\:border-md-primary:focus-within { border-color: var(--md-primary); }
+  .hover\:bg-md-primary:hover { background-color: var(--md-primary); }
+  .hover\:bg-md-primary-container:hover { background-color: var(--md-primary-container); }
+  .hover\:text-md-primary:hover { color: var(--md-primary); }
+  .hover\:text-md-on-surface:hover { color: var(--md-on-surface); }
+  .hover\:text-md-tertiary:hover { color: var(--md-tertiary); }
+  .hover\:text-md-error:hover { color: var(--md-error); }
+  .hover\:bg-md-surface-container:hover { background-color: var(--md-surface-container); }
+  .hover\:bg-md-surface-container-low:hover { background-color: var(--md-surface-container-low); }
+  .hover\:bg-md-surface-container-high:hover { background-color: var(--md-surface-container-high); }
+  .hover\:border-md-on-surface:hover { border-color: var(--md-on-surface); }
+  .hover\:border-md-primary:hover { border-color: var(--md-primary); }
+  .active\:bg-md-surface-container:active { background-color: var(--md-surface-container); }
+  .active\:bg-md-surface-container-high:active { background-color: var(--md-surface-container-high); }
+  .group:hover .group-hover\:text-md-primary { color: var(--md-primary); }
+  .group:hover .group-hover\:text-md-on-surface { color: var(--md-on-surface); }
+}
+.medra-mono {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* fade-up entry */
+@keyframes medra-fade-up {
+  from { opacity: 0; transform: translateY(24px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.medra-fade-up {
+  opacity: 0;
+  animation: medra-fade-up 0.6s ease forwards;
+}
+
+/* medra blink — Hero badge 점, terminal cursor */
+@keyframes medra-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+.medra-blink {
+  animation: medra-blink 2s ease-in-out infinite;
+}
+.medra-cursor-blink {
+  animation: medra-blink 1.2s step-end infinite;
+}
+
+/* ---------------------------------------------------------------------------
+ * Theme: Dark — [data-theme="dark"]. 에메랄드 브랜드 유지한 M3 다크 팔레트.
+ * 서브셋은 medra/regia 오버라이드와 동일 토큰 집합(+background).
+ * ------------------------------------------------------------------------- */
+[data-theme="dark"] {
+  --md-background: #0F1412;
+  --md-on-background: #E1E7E3;
+  --md-surface: #111614;
+  --md-surface-bright: #37403D;
+  --md-surface-container-lowest: #0C100E;
+  --md-surface-container-low: #161C19;
+  --md-surface-container: #1B2220;
+  --md-surface-container-high: #222A27;
+  --md-surface-container-highest: #283130;
+  --md-surface-variant: #1E2724;
+  --md-on-surface: #E1E7E3;
+  --md-strong: #A5EFC9;            /* 밝은 민트 — 볼드 강조 가독 */
+  --md-on-surface-variant: #A5B1AA;
+  --md-outline: #3A4640;
+  --md-outline-variant: #333E39;   /* 카드 경계 강화(기존 #2A332F 는 surface-container 와 근접) */
+  --md-surface-tint: #6FD3A8;
+
+  --md-primary: #6FD3A8;
+  --md-on-primary: #003824;
+  --md-primary-container: #0E5138;
+  --md-on-primary-container: #A8F0CD;
+  --md-primary-fixed: #123B2C;
+  --md-primary-fixed-dim: #0E2F23;
+  --md-on-primary-fixed: #A8F0CD;
+  --md-on-primary-fixed-variant: #8BD9B5;
+  --md-inverse-primary: #0F6B4A;
+
+  --md-secondary: #A9C3F7;
+  --md-on-secondary: #0A2C6B;
+  --md-secondary-container: #24448F;
+  --md-secondary-fixed: #1B3468;
+  --md-secondary-fixed-dim: #142A57;
+  --md-on-secondary-fixed: #D9E2FF;
+  --md-on-secondary-fixed-variant: #A9C3F7;
+
+  --md-tertiary: #E7DA63;               /* 레몬 — 다크 배경 가독(사용자 피드백 2026-07-16) */
+  --md-on-tertiary: #363103;
+  --md-tertiary-container: #4A430A;
+  --md-on-tertiary-container: #F5EFA8;
+  --md-tertiary-fixed: #46400C;
+  --md-tertiary-fixed-dim: #38330A;
+  --md-on-tertiary-fixed: #F5EFA8;
+  --md-on-tertiary-fixed-variant: #E7DA63;
+
+  --md-error: #FFB4AB;
+  --md-on-error: #690005;
+  --md-error-container: #93000A;
+  --md-on-error-container: #FFDAD6;
+
+  /* 베이스에만 있던 토큰 — 다크 미지정 시 라이트 값이 새어 안 보임(감사 2026-07-16) */
+  --md-success: #3DDC97;
+  --md-inverse-surface: #E1E7E3;
+  --md-inverse-on-surface: #14201B;
+  --md-surface-dim: #0C100E;
+}
+
+[data-theme="dark"] body,
+[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+[data-theme="dark"] .theme-grad-text {
+  background-image: linear-gradient(90deg, #6FD3A8, #A9C3F7);
+}
+
+/* =============================================================================
+ * ✨ Visual kicks (2026-07-16) — 오로라 히어로 · 스트리밍 잉크 · 글라스 라이브 피드
+ * · View Transitions. 전부 토큰 파생(color-mix)이라 4테마 자동 대응.
+ * reduced-motion은 상단 전역 미디어 쿼리가 애니메이션을 정지시킴.
+ * ========================================================================== */
+
+/* ── 오로라 히어로 배경 — 빈 대화 첫 화면. 블러 큰 그라데이션 blob 3개가
+ *    서로 다른 주기로 유영. GPU 합성(transform·opacity만 변형). */
+.aurora-field {
+  position: absolute;
+  inset: -140px -180px;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+  filter: blur(70px) saturate(1.2);
+  opacity: 0.55;
+}
+.aurora-field > span {
+  position: absolute;
+  border-radius: 9999px;
+  will-change: transform;
+}
+.aurora-field > span:nth-child(1) {
+  top: 8%; left: 12%; width: 46%; height: 52%;
+  background: radial-gradient(circle at 40% 40%,
+    color-mix(in oklab, var(--md-primary) 62%, transparent), transparent 70%);
+  animation: aurora-drift-a 21s ease-in-out infinite alternate;
+}
+.aurora-field > span:nth-child(2) {
+  top: 30%; right: 6%; width: 42%; height: 48%;
+  background: radial-gradient(circle at 60% 45%,
+    color-mix(in oklab, var(--md-tertiary) 58%, transparent), transparent 70%);
+  animation: aurora-drift-b 27s ease-in-out infinite alternate;
+}
+.aurora-field > span:nth-child(3) {
+  bottom: 4%; left: 30%; width: 40%; height: 44%;
+  background: radial-gradient(circle at 50% 55%,
+    color-mix(in oklab, var(--md-primary) 34%, var(--md-tertiary) 22%), transparent 72%);
+  animation: aurora-drift-c 33s ease-in-out infinite alternate;
+}
+@keyframes aurora-drift-a {
+  from { transform: translate3d(0, 0, 0) scale(1) rotate(0deg); }
+  to   { transform: translate3d(9%, 12%, 0) scale(1.18) rotate(12deg); }
+}
+@keyframes aurora-drift-b {
+  from { transform: translate3d(0, 0, 0) scale(1.1); }
+  to   { transform: translate3d(-12%, -9%, 0) scale(0.92); }
+}
+@keyframes aurora-drift-c {
+  from { transform: translate3d(-6%, 4%, 0) scale(0.95); }
+  to   { transform: translate3d(8%, -10%, 0) scale(1.15); }
+}
+/* 다크에선 발광감을 살짝 올림 */
+[data-theme="dark"] .aurora-field { opacity: 0.4; filter: blur(80px) saturate(1.35); }
+
+/* ── 스트리밍 잉크 — 꼬리 페이드 마스크. 스트리밍 컨테이너 하단 가장자리
+ *    (새 글자가 나타나는 곳)를 살짝 투명하게 → 잉크가 배어나오듯 등장.
+ *    v1의 블록 단위 animation은 react-markdown 재파싱 리마운트마다 재생돼
+ *    깜빡임 유발(2026-07-16 사용자 리포트) → 정적 mask로 교체(리마운트 무관). */
+.ink-stream {
+  mask-image: linear-gradient(
+    to bottom,
+    black calc(100% - 1.6em),
+    rgba(0, 0, 0, 0.35)
+  );
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    black calc(100% - 1.6em),
+    rgba(0, 0, 0, 0.35)
+  );
+}
+/* md-ink-in — View Transition(citation-card) 등장 등에서 재사용하는 키프레임 */
+@keyframes md-ink-in {
+  from { opacity: 0; filter: blur(7px); transform: translateY(4px); }
+  60%  { opacity: 1; }
+  to   { opacity: 1; filter: blur(0); transform: translateY(0); }
+}
+/* 스트리밍 커서 글로우 — 기존 caret 위에 은은한 빛 번짐 펄스 */
+.md-caret-glow {
+  box-shadow:
+    0 0 6px color-mix(in oklab, var(--md-primary) 80%, transparent),
+    0 0 18px color-mix(in oklab, var(--md-primary) 45%, transparent);
+  animation: md-caret-blink 1s step-end infinite,
+             md-caret-glow-pulse 1.8s ease-in-out infinite;
+}
+@keyframes md-caret-glow-pulse {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.6); }
+}
+
+/* ── 라이브 근거 수집 글라스 카드 — 검색 이벤트가 실시간으로 흘러 쌓임 */
+.live-glass {
+  position: relative;
+  border-radius: var(--radius-card, 12px);
+  border: 1px solid color-mix(in oklab, var(--md-primary) 22%, var(--md-outline-variant));
+  background:
+    linear-gradient(135deg,
+      color-mix(in oklab, var(--md-primary) 7%, transparent),
+      color-mix(in oklab, var(--md-tertiary) 6%, transparent) 60%,
+      transparent),
+    color-mix(in oklab, var(--md-surface) 72%, transparent);
+  backdrop-filter: blur(14px) saturate(1.3);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3);
+  overflow: hidden;
+}
+/* 상단을 훑는 빛줄기 — 수집이 살아있음을 암시 */
+.live-glass::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0; height: 1px;
+  background: linear-gradient(90deg, transparent,
+    color-mix(in oklab, var(--md-primary) 85%, white) 50%, transparent);
+  background-size: 220% 100%;
+  animation: md-shimmer 2.6s linear infinite;
+}
+.live-glass-item {
+  animation: live-item-in 0.45s var(--motion-ease-standard) both;
+}
+@keyframes live-item-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.98); filter: blur(4px); }
+  to   { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+}
+/* 레이더 펄스 아이콘 — 동심원 파문 */
+.live-radar {
+  position: relative;
+  display: inline-flex;
+  width: 16px; height: 16px;
+  align-items: center; justify-content: center;
+}
+.live-radar::before, .live-radar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  border: 1.5px solid var(--md-primary);
+  animation: live-radar-ping 2s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+.live-radar::after { animation-delay: 1s; }
+.live-radar > span {
+  width: 5px; height: 5px;
+  border-radius: 9999px;
+  background: var(--md-primary);
+}
+@keyframes live-radar-ping {
+  from { transform: scale(0.4); opacity: 0.9; }
+  to   { transform: scale(1.5); opacity: 0; }
+}
+
+/* ── View Transitions — 패널 열림·인용 전환 크로스페이드/morph */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 200ms;
+  animation-timing-function: var(--motion-ease-standard);
+}
+.vt-right-panel { view-transition-name: right-panel; }
+.vt-citation-card { view-transition-name: citation-card; }
+::view-transition-old(citation-card) { animation: md-fade-in 180ms reverse both; }
+::view-transition-new(citation-card) { animation: md-ink-in 260ms var(--motion-ease-standard) both; }
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
+}
+
+/* ── 입력창 슬라이딩 morph — 빈 화면(중앙) ↔ 스레드(하단) ChatInput을 같은
+ *    view-transition-name으로 묶어 첫 전송 시 브라우저가 위치를 자동 모핑.
+ *    old 스냅샷은 숨기고(동일 콘텐츠 이중 페이드 방지) group이 이동만 담당. */
+.vt-chat-input { view-transition-name: chat-input; }
+::view-transition-group(chat-input) {
+  animation-duration: 460ms;
+  animation-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
+}
+::view-transition-old(chat-input) { display: none; }
+::view-transition-new(chat-input) { animation: none; }
+
+/* ────────────────────────────────────────────────────────────────────────
+ * 모바일 사용성 (2026-07-26)
+ * ──────────────────────────────────────────────────────────────────────── */
+
+/* iOS Safari 자동 확대 방지 — 폰트 16px 미만인 입력에 포커스하면 브라우저가
+ * 페이지를 강제 확대하고 **되돌리지 않는다**(레이아웃이 어긋난 채 남음).
+ * 데스크톱 타이포는 그대로 두고 좁은 화면에서만 16px 로 올린다.
+ * ※ `maximum-scale=1` 로 막는 흔한 우회는 확대 자체를 봉쇄해 접근성을
+ *   해치므로 쓰지 않는다. */
+@media (max-width: 767px) {
+  input[type="text"],
+  input[type="search"],
+  input[type="email"],
+  input[type="password"],
+  input[type="number"],
+  input:not([type]),
+  textarea,
+  select {
+    font-size: 16px;
+  }
+}
+
+/* 터치 타깃 — 좁은 화면에서 아이콘 버튼 최소 44x44(Apple HIG·WCAG 2.5.5).
+ * 시각 크기는 유지하고 히트 영역만 확장(::after 확장으로 레이아웃 불변). */
+@media (max-width: 767px) and (pointer: coarse) {
+  [data-touch-target] {
+    position: relative;
+  }
+  [data-touch-target]::after {
+    content: "";
+    position: absolute;
+    inset: 50%;
+    width: 44px;
+    height: 44px;
+    transform: translate(-50%, -50%);
+  }
+}
+
+/* 관련 서식 [더 보기] — 새로 붙은 행이 "추가됐다"는 걸 보이게(2026-09-21 지적
+ * "더 보기 눌러도 추가됐는지 모르겠다"). 아래에서 밀려 올라오며 잠깐 강조색이 남는다. */
+.form-row-in {
+  animation:
+    form-row-slide 0.38s var(--motion-ease-standard) both,
+    form-row-flash 1.6s ease-out both;
+}
+@keyframes form-row-slide {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes form-row-flash {
+  0%, 35% { background-color: color-mix(in oklab, var(--md-primary-container) 55%, transparent); }
+  100%    { background-color: transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .form-row-in { animation: form-row-flash 1.6s ease-out both; }
+}
+
+/* 인용 종별 색 — 테마와 무관한 고정 팔레트(2026-09-21 "칩 색이 안 맞는다").
+ * 종전엔 테마 토큰(primary/secondary/tertiary)에 묶여 medra·regia 테마에서 종별끼리
+ * 겹쳤고, 가이드라인 녹색이 법령 녹색과 구별되지 않았다. 칩·범례가 같은 두 값을 쓴다. */
+:root {
+  --cite-law-bg: #DFF0E6;   --cite-law-fg: #0E5A3C;   /* 법령 — 녹 */
+  --cite-rule-bg: #DCE6FA;  --cite-rule-fg: #264A9A;  /* 행정규칙·고시 — 청 */
+  --cite-case-bg: #FAE9C6;  --cite-case-fg: #7A4A00;  /* 판례·해석 — 황 */
+  --cite-guide-bg: #EBE2FA; --cite-guide-fg: #5A2BA0; /* 가이드라인 — 보라 */
+  --cite-annex-bg: #E6E6EA; --cite-annex-fg: #37373E; /* 별표·서식 — 회 */
+  --cite-web-bg: #FFFFFF;   --cite-web-fg: #37373E;   /* 웹 — 테두리만 */
+}
+
+/* 이용 통계 계열 색(2026-09-21) — dataviz 기준 팔레트 1·2번, 테마 무관.
+ * validate_palette: 인접 CVD ΔE 24.7 · 정상시 33.6 PASS. medra 배경에서 주황 대비 2.86:1 →
+ * 막대 위 합계 라벨 + 표 보기로 보완(relief rule). */
+:root {
+  --usage-real: #2a78d6;      /* 실사용 */
+  --usage-internal: #eb6834;  /* 내부(관리자·테스트·스크립트) */
+}
