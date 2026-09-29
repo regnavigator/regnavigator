@@ -1,0 +1,12 @@
+# 가드레일 게이트 서비스 의존 (DGX GB10, aarch64). 핀 고정 = 재현성.
+# torch 는 GB10(Blackwell sm_121)에서 cu128 필요 — 프로덕션은 openlaw-search 의
+# 검증된 venv(torch 2.11.0+cu128) 재사용 권장(deploy.sh). 독립 설치 시:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu128
+transformers==5.13.0
+fastapi==0.139.0
+uvicorn==0.50.1
+pydantic==2.13.4
+# 서빙 방식 결정(2026-07-08):
+#  - NER(OpenMed, 토큰분류)   = transformers (vLLM 불가). :8090
+#  - 의도(Qwen3.5-0.8B, 생성) = transformers, 별도 프로세스(부하 격리). :8091
+#    스케일업 경로: vLLM + guided_choice(예/아니오 강제·배치) — QPS 증가 시.

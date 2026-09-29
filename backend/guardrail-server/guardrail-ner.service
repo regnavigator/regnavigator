@@ -1,0 +1,22 @@
+# systemd 유닛 — DGX 상시 서비스(부팅 자동시작 + 크래시 자동복구).
+# 설치:
+#   sudo cp guardrail-ner.service /etc/systemd/system/
+#   printf 'INSTANCE_API_KEY=<키>\nNER_THRESHOLD=0.4\n' > ~/Desktop/guardrail-ner/guardrail.env
+#   chmod 600 ~/Desktop/guardrail-ner/guardrail.env
+#   sudo systemctl daemon-reload && sudo systemctl enable --now guardrail-ner
+# 운영: systemctl status|restart guardrail-ner · journalctl -u guardrail-ner -f
+[Unit]
+Description=Guardrail PII NER service (medi-back)
+After=network.target
+
+[Service]
+Type=simple
+User=nam
+WorkingDirectory=/srv/guardrail-ner
+EnvironmentFile=/srv/guardrail-ner/guardrail.env
+ExecStart=/srv/github/openlaw-etl/.venv/bin/python -m uvicorn serve:app --host 0.0.0.0 --port 8090
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

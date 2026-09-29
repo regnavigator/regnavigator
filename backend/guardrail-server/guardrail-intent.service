@@ -1,0 +1,16 @@
+# systemd 유닛 — DGX 상시(부팅 자동시작·크래시 자동복구). 포트 8091.
+# 설치: sudo cp guardrail-intent.service /etc/systemd/system/
+#       sudo systemctl daemon-reload && sudo systemctl enable --now guardrail-intent
+[Unit]
+Description=Guardrail intent classifier (medi-back)
+After=network.target
+[Service]
+Type=simple
+User=nam
+WorkingDirectory=/srv/guardrail-ner
+EnvironmentFile=/srv/guardrail-ner/guardrail.env
+ExecStart=/srv/github/openlaw-etl/.venv/bin/python -m uvicorn serve_intent:app --host 0.0.0.0 --port 8091
+Restart=always
+RestartSec=5
+[Install]
+WantedBy=multi-user.target
