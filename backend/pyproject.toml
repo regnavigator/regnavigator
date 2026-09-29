@@ -1,0 +1,89 @@
+[project]
+name = "medi-back"
+version = "0.8.0"
+description = "의료 규제 상담 deepagent — backend"
+requires-python = ">=3.11"
+dependencies = [
+  # ADR-0001 Phase 5 (2026-07-14): langgraph·langgraph-cli·langgraph-sdk·
+  # langchain(메타)·deepagents 은퇴 — 자체 SSE 루프(src/chat_loop.py) +
+  # uvicorn + threads_repo 로 대체. LLM 스택은 core+anthropic 만.
+  "langchain-core>=1.0",
+  "langchain-anthropic>=1.0",
+  # 별표·서식 HWP → 문서 뷰어 HTML(2026-09-08, src/annex_view.py). HWP 5(OLE) 전용.
+  "pyhwp>=0.1b15",
+  # pyhwp 가 `six` 를 import 하면서 메타데이터에 선언하지 않는다 — dev venv 는 dateutil 이
+  # 끌고 와 가려졌고, 운영 이미지는 없어 hwp5html 서브프로세스가 ImportError(2026-09-09,
+  # 미리보기 전건 503). 명시 고정.
+  "six>=1.16",
+  # NOTE (2026-07-13, ADR-0001 Phase 0): langchain-openai 는 base 에서 제거 —
+  # 유일 사용처가 REPORT_WRITER_BASE_URL(vLLM writer, lazy import)·scripts/ingest.py.
+  # [writer-vllm] extra 로 이동, prod 는 extras 에 포함(운영 27B writer 활성).
+  "tavily-python>=0.5",
+  # openlaw-etl 4 DB 드라이버 — qdrant + neo4j + mongo + (PG는 [prod] extra)
+  "qdrant-client>=1.10",
+  "neo4j>=5.20",
+  "pymongo>=4.6",
+  # NOTE (2026-05-14 다이어트): 운영은 EMBEDDING_API_URL(원격) + USE_QDRANT_HYBRID=1
+  # 경로라서 sentence-transformers / torch / transformers 가 사실상 안 쓰임.
+  # ~1.5GB 이미지 절약을 위해 [local-fallback] extras 로 이동.
+  # 로컬 폴백·ingest 가 필요하면:   pip install ".[local-fallback]"
+  # 운영에서 폴백 강제가 필요해지면 sentence-transformers 만 base 로 옮기면 됨.
+  "python-dotenv>=1.0",
+  "fastapi>=0.115",
+  "uvicorn>=0.30",
+  "pyjwt>=2.8",
+  # 서류 기입값 저장 암호화(Fernet) — src/persistence/field_crypto.py (2026-09-18)
+  "cryptography>=42",
+  "httpx>=0.27",
+  # 보고서 DOCX 변환 — pandoc 바이너리 동봉(시스템 설치 불요). 미설치 시 .md 폴백.
+  "pypandoc-binary>=1.13",
+  # 파일 업로드 v1 (2026-08-05): POST /files/extract 텍스트 추출.
+  # HWPX 는 stdlib(zipfile+ElementTree), 구형 HWP/DOC 은 미지원(안내 거절).
+  "python-multipart>=0.0.9",  # FastAPI UploadFile 파싱
+  "pypdf>=4.0",
+  "python-docx>=1.1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "pytest-asyncio>=0.23",
+  "pytest-cov>=5.0",
+  "ruff>=0.4",
+]
+prod = [
+  # Postgres 백엔드 (배포 시 활성)
+  "psycopg[binary,pool]>=3.2",
+  "google-cloud-storage>=2.18",
+  # Sparse encoder — Kiwi 형태소 (md5 해시 vocab, byte-for-byte ETL 매칭).
+  # NOTE: 과거 fastembed>=0.3 도 prod 였으나 kiwi-bm25 default 전환 (2026-05-14)
+  # 으로 onnxruntime 의존 ~200MB 절약. SPARSE_ENCODER=fastembed-bm25 다시 쓸 일
+  # 생기면 fastembed 를 prod 또는 [local-fallback] 로 추가.
+  "kiwipiepy>=0.18",
+  # 운영은 REPORT_WRITER_BASE_URL(DGX 27B vLLM) 활성 — writer-vllm 경로 필수
+  "langchain-openai>=1.0",
+]
+
+# vLLM(OpenAI 호환) 보고서 writer — src/models.py report_writer_model() lazy import.
+# REPORT_WRITER_BASE_URL 미설정 환경(dev 기본)에선 불필요(Sonnet 폴백).
+writer-vllm = [
+  "langchain-openai>=1.0",
+]
+
+# 로컬 폴백 (운영 경로 X) — dev/ingest 또는 원격 임베딩/리랭커 장애 회피용.
+# scripts/ingest.py 및 src/retrieval/{embeddings,reranker}.py 의
+# lazy import 경로. 미설치 시 코드는 자동 폴백/스킵.
+local-fallback = [
+  "sentence-transformers>=3.0",  # 로컬 BGE-M3 임베딩 + BGE-reranker
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["src*"]

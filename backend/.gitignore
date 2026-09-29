@@ -1,0 +1,72 @@
+# 시크릿
+.env
+.env.local
+*.pem
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# LangGraph
+.langgraph_api/
+
+# 로컬 전용 산출물 — Drive 수동 업로드용 패치 로그 시트 등 (scripts/export_patch_log.py)
+local/
+
+# 로컬 데이터 (08_DATA §5)
+data/raw/
+data/intermediate/
+qdrant_data/
+
+# export 산출물 (scripts/export_reports.py)
+reports/
+reports_test/
+
+# 영속 dev 백엔드 산출물 (src/persistence)
+reports_blobs/
+medi_reports.db
+medi_reports.db-journal
+medi_reports.db-wal
+medi_reports.db-shm
+
+# bench 산출물 (scripts/bench_*.py)
+bench_*.md
+
+# 로컬 스크래치·진단·로그 (커밋 안 함)
+scripts/_*
+!scripts/_langsmith_citations.py
+*.log
+eval_report.json
+
+# A/B 테스트 산출물 (scripts/ab_test.py)
+ab_results/
+
+# 에디터
+.vscode/
+.idea/
+.DS_Store
+
+# Claude Code
+.claude/settings.local.json
+.env.bak
+.env.*
+# 예외 — 플레이스홀더 템플릿(시크릿 없음)은 추적. 실제 값 .env/.env.docker 는 계속 무시.
+!.env.example
+!.env.docker.example
+
+# 스킬 번들 원본 아카이브 (배포본은 src/skills/)
+/temp/
+
+# 반입 자료 보관함 — 유출 금지(IRB SOP·기관 표준운영지침·내부 배포본 등).
+# 2026-08-27: `git add -A` 로 통째 커밋될 뻔했다(푸시 전 회수). 커밋 자체를 막는다.
+/reference/
+
+# research/ 데이터·실행 산출물 — 비식별 덤프라도 git 에 올리지 않는다
+research/data/
+research/runs/

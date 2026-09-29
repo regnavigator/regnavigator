@@ -1,0 +1,73 @@
+# 시크릿
+.env
+.env.local
+.env.docker
+*.pem
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# LangGraph local state
+.langgraph_api/
+
+# 로컬 데이터 — bm25_index 등은 bind mount로 컨테이너 런타임에 주입되므로
+# image에는 절대 들어가면 안 됨 (수백MB~GB 낭비).
+# ⚠️ 루트 앵커(/) 필수 — 앵커 없으면 src/data 같은 하위 소스 dir 도 제외돼
+# import 깨짐(2026-07-22 사고: src.data 미포함 → /chat 500).
+/data/
+# ⚠️ 예외 — 이 파일은 런타임에 `GET /suggestions`(첫 화면 가이드 질문)가 읽는다.
+# /data/ 를 통째 제외한 탓에 이미지에 없어 운영에서 **500 "suggestions file
+# missing"** 이었다(2026-08-03 실측). 코드가 읽는 데이터는 이미지에 있어야 한다.
+!/data/suggested_questions.json
+/qdrant_data/
+medi_reports.db*
+reports/
+reports_test/
+reports_blobs/
+
+# bench·테스트 산출물
+bench_*.md
+ab_results/
+
+# 스킬 번들 원본 아카이브 — 배포본은 src/skills/ (이미지에 포함됨)
+/temp/
+
+# 에디터
+.vscode/
+.idea/
+.DS_Store
+.git/
+.gitignore
+
+# 문서·설계 (이미지 빌드에 불필요)
+00_PRINCIPLES.md
+01_CAPABILITIES.md
+02_INTERFACE.md
+03_ARCHITECTURE.md
+04_INFRASTRUCTURE.md
+05_HARNESS.md
+06_SKILLS.md
+07_PROMPTS.md
+08_DATA.md
+09_DEPLOYMENT.md
+README.md
+docs/*
+!docs/legal
+# 관리자 [운영 매뉴얼] 탭(GET /admin/ops-manual)이 런타임에 읽는다 — 빠지면 503.
+!docs/product/ops_feature_manual.md
+design/
+
+# 테스트
+tests/
+
+# Claude Code
+.claude/
+
+# 연구 작업 공간 — 배포 이미지에 넣지 않는다(2026-09-26)
+/research/

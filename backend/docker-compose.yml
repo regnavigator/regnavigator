@@ -1,0 +1,519 @@
+# medi-back self-hosted (GCP VM) docker compose.
+#
+# 아키텍처 (thin-client — 로컬 ML 없음):
+#   - medi-back: 자체 VM docker compose. 오케스트레이션·인용·가드레일만.
+#   - 운영 postgres: reports·users·events·feedback + chat thread 상태(threads_repo).
+#   - medi-cron: 체크포인트·blob 보존정리(일 1회). medi-backup: 일일 pg_dump.
+#
+# 외부 노출 포트:
+#   6000 → medi-back (FastAPI·uvicorn 단일 endpoint)
+#   6001 → postgres (운영·디버그용, 방화벽으로 IP 제한 권장)
+#
+# 외부 의존:
+#   - DGX(Tailscale): 검색 API 8080(⚠️필수) · PII NER 8090 · 의도 8091 · 27B writer 8000
+#   - openlaw-etl PG/Mongo/Neo4j (/article·/law-graph 전용 — RAG 검색은 /search API)
+#   - LLM: ANTHROPIC_API_KEY · (폴백) OPENAI_API_KEY
+#   - Tavily · (선택) SMTP
+#
+# 사용:
+#   cp .env.docker.example .env.docker   # 값 채움 (chmod 600)
+#   python scripts/check_config.py       # 배포 전 점검
+#   docker compose --env-file .env.docker up -d
+#   docker compose logs -f medi-back medi-cron medi-backup
+#
+# ⚠️ STRICT_CONFIG=1 이면 prod 필수 env(NEXTAUTH_SECRET·ANTHROPIC_API_KEY·
+#    RAG_SEARCH_API_URL/_KEY) 누락 시 부팅이 차단된다.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: medi-postgres
+    restart: unless-stopped
+    ports:
+      - "6001:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-medi}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-medi}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./db/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-medi} -d ${POSTGRES_DB:-medi}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - medi-net
+
+  medi-back:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
+        BUILD_TIME: ${BUILD_TIME:-}
+    image: medi-back:latest
+    container_name: medi-back
+    restart: unless-stopped
+    ports:
+      - "6000:8000"
+    environment:
+      # === LLM ===
+      # 컨테이너 TZ — 서버/로그를 KST 로(저장은 코드가 timezone.utc 명시라 UTC 유지).
+      # naive datetime.now() 사용처 0개라 안전(2026-07-23 확인).
+      TZ: ${TZ:-Asia/Seoul}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      LLM_MODEL: ${LLM_MODEL:-claude-sonnet-4-6}
+      LLM_FALLBACK: ${LLM_FALLBACK:-openai:gpt-4o}
+      SUBAGENT_MODEL: ${SUBAGENT_MODEL:-claude-haiku-4-5-20251001}
+      SUBAGENT_FALLBACK: ${SUBAGENT_FALLBACK:-openai:gpt-4o-mini}
+      TITLE_MODEL: ${TITLE_MODEL:-anthropic:claude-haiku-4-5-20251001}
+      MAX_MODEL_CALLS_PER_RUN: ${MAX_MODEL_CALLS_PER_RUN:-250}
+
+      # === 채팅 루프 (fast) ===
+      CHAT_LOOP_DISABLE: ${CHAT_LOOP_DISABLE:-}
+      CHAT_MAX_TOKENS: ${CHAT_MAX_TOKENS:-4096}
+      CHAT_AUTO_CONTINUE_MAX: ${CHAT_AUTO_CONTINUE_MAX:-2}
+      CHAT_FORCE_WEB: ${CHAT_FORCE_WEB:-1}
+      CHAT_SUMMARY_TRIGGER_TOKENS: ${CHAT_SUMMARY_TRIGGER_TOKENS:-60000}
+      # 채팅 1턴 입력 상한(문자). 모델 컨텍스트(1M)와 무관한 운영 상한.
+      CHAT_MAX_INPUT_CHARS: ${CHAT_MAX_INPUT_CHARS:-32000}
+      CHAT_SUMMARY_KEEP_TURNS: ${CHAT_SUMMARY_KEEP_TURNS:-2}
+      CHAT_SUMMARY_MODEL: ${CHAT_SUMMARY_MODEL:-}
+      CHAT_PROMPT_CACHE_DISABLE: ${CHAT_PROMPT_CACHE_DISABLE:-}
+      CHAT_PROMPT_CACHE_TTL: ${CHAT_PROMPT_CACHE_TTL:-1h}
+      PROMPT_WARM_INTERVAL_S: ${PROMPT_WARM_INTERVAL_S:-2700}
+      CHAT_MODEL_AB: ${CHAT_MODEL_AB:-}
+      CHAT_MODEL_OVERRIDE_ALLOW: ${CHAT_MODEL_OVERRIDE_ALLOW:-}
+      CHAT_SSE_HEARTBEAT_S: ${CHAT_SSE_HEARTBEAT_S:-15}
+      # 파일 업로드 v1 (2026-08-05) — /files/extract + /chat attachments
+      FILE_MAX_UPLOAD_MB: ${FILE_MAX_UPLOAD_MB:-15}
+      FILE_MAX_EXTRACT_CHARS: ${FILE_MAX_EXTRACT_CHARS:-120000}
+      CHAT_MAX_ATTACHMENTS: ${CHAT_MAX_ATTACHMENTS:-3}
+      CHAT_MAX_TOTAL_INPUT_CHARS: ${CHAT_MAX_TOTAL_INPUT_CHARS:-150000}
+      # ⚠️ 숫자 노브에 `:-`(빈 기본값)를 주면 컨테이너엔 **빈 문자열로 존재**하고
+      # `int(os.getenv(k, "4"))` 가 기본값 대신 "" 를 받아 터진다 — 2026-08-03
+      # 실측으로 검색 전체가 실패했다. 숫자 노브는 반드시 실제 기본값을 적을 것.
+      CHAT_GUIDE_TOP_K: ${CHAT_GUIDE_TOP_K:-4}
+      CHAT_RETENTION_DAYS: ${CHAT_RETENTION_DAYS:-90}
+      # 이벤트 보존정리 — 내용(질문·검색어)은 삭제, 지표(토큰·비용)는 비식별화.
+      EVENT_CONTENT_RETENTION_DAYS: ${EVENT_CONTENT_RETENTION_DAYS:-90}
+      EVENT_METRIC_RETENTION_DAYS: ${EVENT_METRIC_RETENTION_DAYS:-90}
+      COVERAGE_JUDGE_ENABLE: ${COVERAGE_JUDGE_ENABLE:-1}
+      COVERAGE_JUDGE_MAX_CITES: ${COVERAGE_JUDGE_MAX_CITES:-35}
+      CHAT_URL_ENFORCE_DISABLE: ${CHAT_URL_ENFORCE_DISABLE:-}
+      # 기관 내부 지침 스킬 (IRB/DRB) — 미설정=비활성
+      SKILL_BUNDLE_DIR: ${SKILL_BUNDLE_DIR:-}
+      SKILL_WHITELIST_EMAILS: ${SKILL_WHITELIST_EMAILS:-}
+      SKILL_LOCAL_MODEL: ${SKILL_LOCAL_MODEL:-}
+      SKILL_LOCAL_BASE_URL: ${SKILL_LOCAL_BASE_URL:-}
+      SKILL_LOCAL_MAX_TOKENS: ${SKILL_LOCAL_MAX_TOKENS:-8192}
+      REPORT_DYNAMIC_OUTLINE: ${REPORT_DYNAMIC_OUTLINE:-}
+      REPORT_YIELD_HOLD_S: ${REPORT_YIELD_HOLD_S:-}
+      REPORT_YIELD_MAX_S: ${REPORT_YIELD_MAX_S:-}
+
+      # === 검색·관측 ===
+      TAVILY_API_KEY: ${TAVILY_API_KEY}
+      # 웹 레인 제외 도메인 — 미설정 시 코드 기본값(UGC·영상 차단).
+      TAVILY_EXCLUDE_DOMAINS: ${TAVILY_EXCLUDE_DOMAINS:-blog.naver.com,m.blog.naver.com,cafe.naver.com,post.naver.com,tistory.com,brunch.co.kr,blogspot.com,youtube.com,m.youtube.com,youtu.be}
+      # LangSmith 트레이싱 제거(2026-09-10). 대화 원문이 국외(LangChain, Inc.)로
+      # 나가는 경로였고, IRB/DRB 스킬 턴을 온프레미스 모델로 돌리는(SKILL_LOCAL_MODEL=1)
+      # 목적과 정면으로 어긋났다 — 트레이싱은 langchain-core 레벨이라 온프레미스
+      # 호출의 프롬프트까지 실려 나간다. 종전 매핑은 기본값이 `:-true` 라
+      # .env.docker 에서 줄을 지워도 켜지는 함정이 있었다.
+      # 되살리려면 개인정보처리방침 §5(국외이전) 갱신이 선행되어야 한다.
+      LANGSMITH_TRACING: "false"
+
+      # === openlaw-etl 4 DB (외부, 별도 서버) ===
+      # PG (article 메타·index)
+      PG_HOST: ${PG_HOST}
+      PG_PORT: ${PG_PORT:-5401}
+      PG_NAME: ${PG_NAME:-openlaw}
+      PG_USER: ${PG_USER}
+      PG_PASS: ${PG_PASS}
+      PG_POOL_MAX: ${PG_POOL_MAX:-20}
+      # Mongo (raw 본문)
+      MONGO_URI: ${MONGO_URI}
+      MONGO_DB: ${MONGO_DB:-openlaw}
+      # Neo4j (별표·인용 그래프)
+      NEO4J_URI: ${NEO4J_URI}
+      NEO4J_USER: ${NEO4J_USER:-neo4j}
+      NEO4J_PASS: ${NEO4J_PASS}
+      # (Qdrant 직접접속 없음 — RAG 검색은 아래 /search API 경유. thin-client)
+      MEDICAL_FILTER_DISABLE: ${MEDICAL_FILTER_DISABLE:-1}
+
+      # === RAG 검색 API (openlaw-etl /search, DGX) — ⚠️ 없으면 검색 전면 실패 ===
+      RAG_SEARCH_API_URL: ${RAG_SEARCH_API_URL}
+      RAG_SEARCH_API_KEY: ${RAG_SEARCH_API_KEY}
+      RAG_SEARCH_TIMEOUT_S: ${RAG_SEARCH_TIMEOUT_S:-20}
+      RAG_SEARCH_TARGET_TYPES: ${RAG_SEARCH_TARGET_TYPES:-}
+      QDRANT_TOP_K: ${QDRANT_TOP_K:-8}
+      SEARCH_MAX_CONCURRENCY: ${SEARCH_MAX_CONCURRENCY:-2}
+      SEARCH_KEEPALIVE_S: ${SEARCH_KEEPALIVE_S:-240}
+      SEARCH_INCLUDE_PENDING: ${SEARCH_INCLUDE_PENDING:-1}
+
+      # === 가드레일 (입력 게이트, DGX) — 미설정 시 폴백(regex-only·휴리스틱) ===
+      PII_GATE_DISABLE: ${PII_GATE_DISABLE:-0}
+      # 1=문맥 PII 검사 불완전 시 차단(기본). 0 으로 끄면 미마스킹 PII 가 새어나간다.
+      PII_GATE_STRICT: ${PII_GATE_STRICT:-1}
+      PII_NER_API_URL: ${PII_NER_API_URL:-}
+      PII_NER_API_KEY: ${PII_NER_API_KEY:-}
+      # 기본 10(2026-08-14) — DGX 공유 GPU 의 지연 스파이크(팀 학습 작업)가
+      # fail-closed 로 전 턴을 차단한 인시던트. 3 은 전용 GPU 가정이었다.
+      PII_NER_TIMEOUT_S: ${PII_NER_TIMEOUT_S:-10}
+      # 긴 입력(문서 붙여넣기) 분할 — 서버 파이프라인 512토큰 상한 대응.
+      # 통째로 보내면 뒷부분 이름·주소가 조용히 미마스킹된다.
+      PII_NER_CHUNK_CHARS: ${PII_NER_CHUNK_CHARS:-600}
+      PII_NER_CHUNK_OVERLAP: ${PII_NER_CHUNK_OVERLAP:-100}
+      PII_NER_MAX_PARALLEL: ${PII_NER_MAX_PARALLEL:-2}
+      # 전체 스캔 예산 — 초과분 포기(입구 지연 상한). 0=무제한(권장 안 함).
+      PII_NER_TOTAL_BUDGET_S: ${PII_NER_TOTAL_BUDGET_S:-30}
+      # 의도 분류기 입력 상한 — 문서를 통째로 보내면 타임아웃으로 판정 무력화.
+      INTENT_MAX_INPUT_CHARS: ${INTENT_MAX_INPUT_CHARS:-2000}
+      INTENT_SEARCH_DISABLE: ${INTENT_SEARCH_DISABLE:-0}
+      INTENT_API_URL: ${INTENT_API_URL:-}
+      INTENT_API_KEY: ${INTENT_API_KEY:-}
+      INTENT_TIMEOUT_S: ${INTENT_TIMEOUT_S:-1}
+      PII_NER_MIN_SCORE: ${PII_NER_MIN_SCORE:-}
+      PII_NER_MIN_SCORE_NAME: ${PII_NER_MIN_SCORE_NAME:-}
+      PII_NER_MIN_SCORE_ADDRESS: ${PII_NER_MIN_SCORE_ADDRESS:-}
+
+      # === 보고서 (로컬 27B writer + 동시성 + 첨부 포맷) ===
+      REPORT_WRITER_BASE_URL: ${REPORT_WRITER_BASE_URL:-}
+      REPORT_WRITER_MODEL: ${REPORT_WRITER_MODEL:-}
+      REPORT_WRITER_API_KEY: ${REPORT_WRITER_API_KEY:-}
+      REPORT_WRITER_PROBE_TTL_S: ${REPORT_WRITER_PROBE_TTL_S:-30}
+      ANNEX_VIEW_CACHE_DIR: ${ANNEX_VIEW_CACHE_DIR:-/tmp/medi_annex_view}
+      REPORT_WRITER_TIMEOUT_S: ${REPORT_WRITER_TIMEOUT_S:-900}
+      # 스트림 콘텐츠 침묵 상한 — 라이브러리 기본 120s 면 긴 prefill 에서 보고서가 죽는다.
+      REPORT_WRITER_STREAM_CHUNK_TIMEOUT_S: ${REPORT_WRITER_STREAM_CHUNK_TIMEOUT_S:-900}
+      REPORT_WRITER_MAX_TOKENS: ${REPORT_WRITER_MAX_TOKENS:-8000}
+      REPORT_SECTIONED: ${REPORT_SECTIONED:-1}
+      REPORT_SECTION_TARGET_CHARS: ${REPORT_SECTION_TARGET_CHARS:-4000}
+      REPORT_DEADLINE_S: ${REPORT_DEADLINE_S:-1800}
+      REPORT_MAX_CONCURRENCY: ${REPORT_MAX_CONCURRENCY:-1}
+      REPORT_ATTACH_FORMAT: ${REPORT_ATTACH_FORMAT:-docx}
+      BLOB_RETENTION_DAYS: ${BLOB_RETENTION_DAYS:-30}
+      CHECKPOINT_RETENTION_DAYS: ${CHECKPOINT_RETENTION_DAYS:-90}
+
+      # === 이메일 알림 (보고서 완료 시 전문 첨부) — 미설정 시 stub ===
+      # EMAIL_SERVER 우선(medi-front NextAuth·Resend 와 같은 값 재사용).
+      EMAIL_SERVER: ${EMAIL_SERVER:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      # 발신자 표시 — 받은편지함에 `noreply` 대신 서비스명이 보이게(2026-09-14 운영
+      # 결정). EMAIL_FROM(noreply@, medi-front NextAuth 와 공유)보다 우선한다.
+      SMTP_FROM: ${SMTP_FROM:-MEDIREG AI <noreply@example.com>}
+      APP_URL: ${APP_URL:-https://app.example.com}
+      SUPPORT_EMAIL: ${SUPPORT_EMAIL:-admin@example.com}
+      SMTP_SSL: ${SMTP_SSL:-}
+      # ⚠️ 빠뜨리면 발신자가 `no-reply@medi` 로 나가 **550 Invalid from field** —
+      # 운영 메일이 전부 거절된다(2026-08-02 실측: 보고서 완료 메일 미발송).
+      # `.env.docker` 에 값이 있어도 이 매핑이 없으면 컨테이너엔 안 들어온다.
+      EMAIL_FROM: ${EMAIL_FROM:-}
+      # 회신 주소 — 없으면 답장이 noreply 로 가 사라진다(앱 안내와 동일 주소로).
+      NOTICE_REPLY_TO: ${NOTICE_REPLY_TO:-admin@example.com}
+
+      # === 보고서 튜닝(기본값 사용 시 생략 가능) ===
+      REPORT_SOURCE_TIMEOUT_S: ${REPORT_SOURCE_TIMEOUT_S:-60}
+      REPORT_MAX_QUERIES: ${REPORT_MAX_QUERIES:-5}
+      REPORT_DECOMPOSE_MODEL: ${REPORT_DECOMPOSE_MODEL:-}
+      REPORT_GROUND_MODEL: ${REPORT_GROUND_MODEL:-}
+      REPORT_QDRANT_TOP_K: ${REPORT_QDRANT_TOP_K:-20}
+      REPORT_REVISE_ENABLE: ${REPORT_REVISE_ENABLE:-1}
+      REPORT_REGATHER_ENABLE: ${REPORT_REGATHER_ENABLE:-1}
+      REPORT_CRITIQUE_MODEL: ${REPORT_CRITIQUE_MODEL:-}
+      REPORT_TIER_UPGRADE_MAX: ${REPORT_TIER_UPGRADE_MAX:-3}
+      REPORT_STALE_AFTER_S: ${REPORT_STALE_AFTER_S:-10800}
+      REPORT_MIN_CITATIONS: ${REPORT_MIN_CITATIONS:-6}
+      # 예약 공지 발송 루프 주기(0=비활성 → 예약이 영영 안 나감).
+      NOTICE_SCHEDULER_INTERVAL_S: ${NOTICE_SCHEDULER_INTERVAL_S:-60}
+      USAGE_WEEKLY_SNAPSHOT_INTERVAL_S: ${USAGE_WEEKLY_SNAPSHOT_INTERVAL_S:-21600}
+      WEEKLY_REPORT_ENABLED: ${WEEKLY_REPORT_ENABLED:-1}
+      WEEKLY_REPORT_TO: ${WEEKLY_REPORT_TO:-admin@example.com}
+      WEEKLY_REPORT_SEND_HOUR: ${WEEKLY_REPORT_SEND_HOUR:-9}
+      WEEKLY_REPORT_SEND_WEEKDAY: ${WEEKLY_REPORT_SEND_WEEKDAY:-0}
+      WEEKLY_REPORT_CHECK_INTERVAL_S: ${WEEKLY_REPORT_CHECK_INTERVAL_S:-900}
+      REPORT_SEARCH_MAX_CONCURRENCY: ${REPORT_SEARCH_MAX_CONCURRENCY:-1}
+      REPORT_MAINT_WAIT_MAX_S: ${REPORT_MAINT_WAIT_MAX_S:-2700}
+      SEARCH_CACHE_SIZE: ${SEARCH_CACHE_SIZE:-512}
+      SEARCH_CACHE_TTL_S: ${SEARCH_CACHE_TTL_S:-3600}
+      READYZ_PROBE_TIMEOUT_S: ${READYZ_PROBE_TIMEOUT_S:-4}
+      READYZ_NER_SLOW_S: ${READYZ_NER_SLOW_S:-2.5}
+      TAVILY_MAX_RESULTS: ${TAVILY_MAX_RESULTS:-5}
+
+      # === 운영 안전장치 ===
+      # 필수 env 누락 시 부팅 차단(조용히 오설정으로 뜨는 사고 방지).
+      STRICT_CONFIG: ${STRICT_CONFIG:-1}
+      OPS_ALERT_WEBHOOK_URL: ${OPS_ALERT_WEBHOOK_URL:-}
+      OPS_ALERT_DEDUP_S: ${OPS_ALERT_DEDUP_S:-600}
+      # 인스턴스 1개 강제(PG 어드바이저리 락). 2번째가 뜨면 프로세스 로컬 동시성
+      # 제어가 통째로 무력화된다 — 부팅에서 차단. warn=경고만 | off=검사 안 함.
+      SINGLE_INSTANCE_LOCK: ${SINGLE_INSTANCE_LOCK:-strict}
+      SINGLE_INSTANCE_WAIT_S: ${SINGLE_INSTANCE_WAIT_S:-20}
+      # 토큰 usage 누락 경고 주기 — 쿼터·비용이 조용히 0 이 되는 걸 관측.
+      TOKEN_USAGE_MISS_LOG_INTERVAL_S: ${TOKEN_USAGE_MISS_LOG_INTERVAL_S:-300}
+      DISABLE_TOKEN_LOGGER: ${DISABLE_TOKEN_LOGGER:-}
+      SERVICE_LAUNCH_AT: ${SERVICE_LAUNCH_AT:-}
+
+      # === 보안 킬스위치 (2026-08-04 감사 H-14) ===
+      # 전부 "끄는" 스위치라 켜져 있으면(=기능 꺼짐) 조용히 위험해진다.
+      # 레지스트리에 등록해 /admin/config 에서 현재 값이 보이게 했다. 기본은 전부 미설정(=기능 켬).
+      SECURITY_HEADERS_DISABLE: ${SECURITY_HEADERS_DISABLE:-}
+      CHAT_GROUNDING_GATE_DISABLE: ${CHAT_GROUNDING_GATE_DISABLE:-}
+      CHAT_CONTACT_GUARD_DISABLE: ${CHAT_CONTACT_GUARD_DISABLE:-}
+      CLAIM_AUDIT_DISABLE: ${CLAIM_AUDIT_DISABLE:-}
+      ENUM_AUDIT_DISABLE: ${ENUM_AUDIT_DISABLE:-}
+      IDENT_AUDIT_DISABLE: ${IDENT_AUDIT_DISABLE:-}
+      DOC_FILL_DISABLE: ${DOC_FILL_DISABLE:-}
+      DOC_FILL_MODEL: ${DOC_FILL_MODEL:-}
+      DOC_FILL_BASE_URL: ${DOC_FILL_BASE_URL:-}
+      DOC_FILL_API_KEY: ${DOC_FILL_API_KEY:-}
+      DOC_FILL_TIMEOUT_S: ${DOC_FILL_TIMEOUT_S:-60}
+      # 야간 골든셋 회귀(medi-cron) — 바뀐 날만 실행(2026-09-18). 1=매일 실행(구 동작)
+      QREG_MAX_AGE_DAYS: ${QREG_MAX_AGE_DAYS:-7}
+      QREG_ALWAYS: ${QREG_ALWAYS:-}
+      # 서류 기입값 저장 암호화(2026-09-18). 비우면 NEXTAUTH_SECRET 파생 키.
+      FILLED_VALUES_ENC_KEY: ${FILLED_VALUES_ENC_KEY:-}
+      # 이미지에 lean 설치된 kordoc(원본 서식 기입) — Dockerfile ENV 와 동일 경로.
+      KORDOC_CLI: ${KORDOC_CLI:-/opt/kordoc/node_modules/kordoc/dist/cli.js}
+      LLM_RATE_LIMIT_DISABLE: ${LLM_RATE_LIMIT_DISABLE:-}
+      # 보안 헤더 값 — 미설정이면 헤더 자체가 안 붙는다(운영에선 설정 권장).
+      STRICT_TRANSPORT_SECURITY: ${STRICT_TRANSPORT_SECURITY:-}
+      CSP: ${CSP:-}
+      # 신뢰 프록시 홉 수. 0=X-Forwarded-For 무시(위조로 IP 한도 우회 방지).
+      # nginx 리버스 프록시 1단이면 1 로.
+      TRUSTED_PROXY_HOPS: ${TRUSTED_PROXY_HOPS:-0}
+
+      # === 튜닝 노브 (레지스트리 등록분) ===
+      REPORTS_SQLITE_PATH: ${REPORTS_SQLITE_PATH:-./medi_reports.db}
+      BLOB_GCS_BUCKET: ${BLOB_GCS_BUCKET:-}
+      # 버스트 버킷 — LLM_MAX_RPS 와 같게 두는 게 기본(버스트 없음).
+      # RPS 를 낮추면 이 값도 함께 낮출 것.
+      LLM_RATE_BUCKET: ${LLM_RATE_BUCKET:-8}
+      MODEL_RETRY_MAX: ${MODEL_RETRY_MAX:-2}
+      GROUND_MODEL: ${GROUND_MODEL:-}
+      SELECTED_GROUNDING_MAX: ${SELECTED_GROUNDING_MAX:-20}
+      REPORT_JOB_MAX_PENDING: ${REPORT_JOB_MAX_PENDING:-4}
+      REPORT_MAX_CITATIONS: ${REPORT_MAX_CITATIONS:-40}
+      REPORT_GUIDE_TOP_K: ${REPORT_GUIDE_TOP_K:-6}
+      REPORT_PER_SOURCE_TEXT_CAP: ${REPORT_PER_SOURCE_TEXT_CAP:-1500}
+      REPORT_WRITER_INPUT_CHARS: ${REPORT_WRITER_INPUT_CHARS:-60000}
+      REPORT_WRITER_CTX_ANSWER_CHARS: ${REPORT_WRITER_CTX_ANSWER_CHARS:-8000}
+      REPORT_WRITER_CTX_CITATION_CHARS: ${REPORT_WRITER_CTX_CITATION_CHARS:-20000}
+
+      # === 영속 (Postgres + 로컬 blob) ===
+      REPORTS_BACKEND: ${REPORTS_BACKEND:-postgres}
+      REPORTS_PG_DSN: postgresql://${POSTGRES_USER:-medi}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-medi}
+      CHECKPOINT_BACKEND: ${CHECKPOINT_BACKEND:-postgres}
+      CHECKPOINT_PG_DSN: postgresql://${POSTGRES_USER:-medi}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-medi}
+      BLOB_BACKEND: ${BLOB_BACKEND:-local}
+      BLOB_LOCAL_DIR: ${BLOB_LOCAL_DIR:-/app/data/blobs}
+      # GCS로 전환 시:
+      # BLOB_BACKEND: gcs
+      # BLOB_GCS_BUCKET: ${BLOB_GCS_BUCKET}
+      # GOOGLE_APPLICATION_CREDENTIALS: /app/secrets/gcs-key.json
+
+      # === 인증·CORS ===
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
+      ADMIN_EMAILS: ${ADMIN_EMAILS}
+      ROOT_ADMIN_EMAILS: ${ROOT_ADMIN_EMAILS:-admin@example.com}
+      API_CORS_ORIGINS: ${API_CORS_ORIGINS}
+      # 클로즈 베타 게이트(CLAUDE.md #9) — 미설정=전면 허용.
+      # BETA_GATE=1 이면 화이트리스트가 비어도 강제 차단(ADMIN 제외).
+      BETA_WHITELIST_EMAILS: ${BETA_WHITELIST_EMAILS:-}
+      BETA_GATE: ${BETA_GATE:-}
+      CONSENT_ENFORCE: ${CONSENT_ENFORCE:-1}
+      API_TOKEN: ${API_TOKEN:-}
+
+      # === 토큰 한도 (2026-07-22 상향: 일 10M / 월 1000M) ===
+      DEFAULT_DAILY_TOKEN_LIMIT: ${DEFAULT_DAILY_TOKEN_LIMIT:-20000000}
+      DEFAULT_MONTHLY_TOKEN_LIMIT: ${DEFAULT_MONTHLY_TOKEN_LIMIT:-1000000000}
+      USAGE_DAY_UTC_OFFSET_HOURS: ${USAGE_DAY_UTC_OFFSET_HOURS:-9}
+
+      # === Rate limit (운영 활성 — dev에선 RATE_LIMIT_DISABLE=1) ===
+      RATE_LIMIT_DISABLE: ${RATE_LIMIT_DISABLE:-0}
+      RATE_LIMIT_PER_IP_PER_MIN: ${RATE_LIMIT_PER_IP_PER_MIN:-60}
+      RATE_LIMIT_PER_USER_PER_MIN: ${RATE_LIMIT_PER_USER_PER_MIN:-30}
+      RATE_LIMIT_PER_USER_PER_HOUR: ${RATE_LIMIT_PER_USER_PER_HOUR:-600}
+
+      # === LLM 호출 client-side rate limit (src/llm_limits.py) ===
+      # 초당 상한 — 동시 부하 429 폭풍 방지. Anthropic 티어 RPM/60 에 맞춰 조정.
+      LLM_MAX_RPS: ${LLM_MAX_RPS:-8}
+
+      # === 도구 한도 ===
+      # deep 시간 단축: 검색 라운드 캡 ↓ (라운드마다 subagent LLM 턴 + 무거운
+      # retrieval/rerank 1회씩 절약). 품질 더 필요하면 env로 상향 가능.
+      MAX_QDRANT_CALLS_PER_RUN: ${MAX_QDRANT_CALLS_PER_RUN:-4}
+      MAX_TAVILY_CALLS_PER_RUN: ${MAX_TAVILY_CALLS_PER_RUN:-2}
+      RECURSION_LIMIT: ${RECURSION_LIMIT:-30}
+
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
+    volumes:
+      - blob_data:/app/data/blobs
+      # (ADR-0001 Phase 5) langgraph_state 볼륨 은퇴 — thread 상태는 운영 PG
+      # (threads_repo)/dev SQLite 에 영속.
+      # GCS 사용 시 서비스 계정 키 마운트:
+      # - ./secrets:/app/secrets:ro
+
+    # 컨테이너가 죽었는지 docker 가 판단(부팅 실패·행 감지).
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+    # 리소스 상한 — 폭주가 호스트 전체를 죽이지 않게(단일 프로세스라 CPU 는 여유).
+    # ⚠️ replicas 는 1 고정 — 동시성 제어(턴 락·LLM RPS 캡·검색 백프레셔·보고서 큐)가
+    # 전부 프로세스 로컬이다(CLAUDE.md §7). 런타임 강제는 src/single_instance.py
+    # (PG 어드바이저리 락) — 이 선언을 지워도 2번째 인스턴스는 부팅에서 차단된다.
+    # ※ compose 의 `deploy:` 는 서비스당 **하나**여야 한다. 여기 합쳐 둔 이유이고,
+    #   위쪽에 따로 선언하면 "mapping key deploy already defined" 로 배포가 죽는다
+    #   (실측 2026-08-04: 이 실수로 배포 1회 실패).
+    deploy:
+      replicas: 1
+      resources:
+        limits: { memory: 3g }
+        reservations: { memory: 512m }
+
+    # 로그가 디스크를 채우지 않게 회전.
+    logging:
+      driver: json-file
+      options: { max-size: "50m", max-file: "5" }
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    # openlaw-etl이 별도 docker network에 있어 host bridge로 못 닿음.
+    # 그 network에 join하면 컨테이너명으로 직접 호출 가능 (가장 안전·빠름).
+    # 네트워크 이름은 OPENLAW_NETWORK env로 override (기본 openlaw-etl_default).
+    networks:
+      - medi-net
+      - openlaw-net
+
+  # ── 보존정리 cron — 대화(90일)·blob(30일) 무한 증가 방지 ────────────
+  # 기본 DRY_RUN(미리보기). 실삭제하려면 .env.docker 에 PRUNE_APPLY=1.
+  # (ADR-0001 Phase 5: 구 prune_checkpoints → prune_threads. 대화 상태는
+  #  threads_repo(운영 PG)에 있고 개인정보처리방침 §3 대화 90일을 이행.)
+  medi-cron:
+    image: medi-back:latest
+    container_name: medi-cron
+    restart: unless-stopped
+    env_file: [.env.docker]
+    environment:
+      PYTHONUTF8: "1"
+      # ⚠️ `python scripts/x.py` 는 sys.path[0] 가 **스크립트 디렉터리**(/app/scripts)라
+      # `import src` 가 ModuleNotFoundError 로 죽는다(2026-08-03 실측 — 루프가 한 번도
+      # 안 돌아 몇 달간 가려져 있었다). medi-back 은 uvicorn 을 /app 에서 띄워 무사했다.
+      PYTHONPATH: /app
+      PRUNE_APPLY: ${PRUNE_APPLY:-0}
+      REPORTS_PG_DSN: postgresql://${POSTGRES_USER:-medi}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-medi}
+      # ⚠️ medi-back 과 같은 blob 위치여야 한다(2026-09-23 실측). 빠져 있어 cron 은 기본값
+      # ./reports_blobs 를 보며 "blob 0개" 로 보고했다 — 보고서 30일 정리가 한 번도 실제로
+      # 돌지 않았고, 행 기준 삭제로 바꾸자 "blob root 밖" 으로 죽었다.
+      BLOB_BACKEND: ${BLOB_BACKEND:-local}
+      BLOB_LOCAL_DIR: ${BLOB_LOCAL_DIR:-/app/data/blobs}
+    # 이미지의 HEALTHCHECK(medi-back 의 `curl 127.0.0.1:8000/healthz`)를 물려받으면
+    # 이 컨테이너는 API 를 띄우지 않으므로 **영구 unhealthy** 로 뜬다 — 상시 빨간불은
+    # 진짜 장애를 가린다(2026-08-03 실측). 루프가 죽으면 PID 1 이 종료돼 restart
+    # 정책이 처리하므로 별도 체크는 의미가 없다.
+    healthcheck:
+      disable: true
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        # ⚠️ 종전엔 `sleep` 이 루프 **맨 앞**이라, 배포로 컨테이너가 재시작될 때마다
+        # 24시간 타이머가 초기화됐다. 하루에 여러 번 배포하는 운영에서는 보존정리가
+        # **한 번도 실행되지 않는다**(2026-08-03 실측: 전체 로그에 실행 기록 0회).
+        # → 기동 직후 한 번 돌리고, 그 다음부터 주기 대기한다.
+        while true; do
+          echo "[cron] $(date -Iseconds) 보존정리 시작 (PRUNE_APPLY=${PRUNE_APPLY:-0})"
+          python scripts/prune_threads.py || echo "[cron] threads 실패"
+          python scripts/prune_blobs.py   || echo "[cron] blobs 실패"
+          python scripts/prune_events.py  || echo "[cron] events 실패"
+          echo "[cron] $(date -Iseconds) 보존정리 종료 — ${PRUNE_INTERVAL_S:-86400}s 대기"
+          sleep "${PRUNE_INTERVAL_S:-86400}"
+        done &
+        # 공식 창구 레지스트리 자동 유지보수 — KST 05:00(회귀·DGX 갱신 뒤).
+        # 답변에서 제거된 URL 채굴 → 공공 도메인·실접속 검증 → 자동 등재,
+        # 기존 등재분 헬스체크 → 죽으면 자동 비활성 + ops 알림.
+        while true; do
+          python scripts/refresh_official_sources.py --at 05:00 || echo "[cron] 창구갱신 실패"
+          sleep 60
+        done &
+        # 골든셋 야간 품질 회귀 — KST 03:00(4시대 DGX 갱신·낮 GPU 경합 회피).
+        # 대기 계산은 스크립트가 하므로 배포로 재시작돼도 타이머가 안 밀린다.
+        # 보존정리와 별도 루프 — 한쪽 실패가 다른 쪽을 안 막는다.
+        while true; do
+          python scripts/quality_regression.py --at 03:00 || echo "[cron] 품질회귀 실패"
+          sleep 60
+        done
+    volumes:
+      - blob_data:/app/data/blobs
+    depends_on:
+      postgres: { condition: service_healthy }
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+    networks: [medi-net]
+
+  # ── 일일 백업 — 운영 PG 덤프(+보존 14일) ────────────────────────────
+  # medi(앱 데이터) + medi_auth(medi-front 인증·계정·비밀번호) 둘 다 덤프.
+  # medi_auth 미존재(컷오버 전)면 그 DB만 스킵하고 medi 는 정상 백업.
+  medi-backup:
+    image: postgres:16-alpine
+    container_name: medi-backup
+    restart: unless-stopped
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        DBS="${POSTGRES_DB:-medi} ${AUTH_DB:-medi_auth}"
+        while true; do
+          sleep "${BACKUP_INTERVAL_S:-86400}"
+          TS=$(date +%Y%m%d_%H%M)
+          for DB in $$DBS; do
+            F=/backups/$${DB}_$${TS}.sql.gz
+            if pg_dump -h postgres -U "${POSTGRES_USER:-medi}" -d "$$DB" | gzip > "$$F"; then
+              echo "[backup] $$F ($(stat -c%s "$$F") bytes)"
+            else
+              echo "[backup] $$DB 실패(미존재/오류) — 스킵"; rm -f "$$F"
+            fi
+          done
+          find /backups -name '*.sql.gz' -mtime +${BACKUP_RETENTION_DAYS:-14} -delete
+        done
+    volumes:
+      - backups:/backups
+    depends_on:
+      postgres: { condition: service_healthy }
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+    networks: [medi-net]
+
+volumes:
+  pg_data:
+    name: medi_pg_data
+  blob_data:
+    name: medi_blob_data
+  backups:
+    name: medi_backups
+
+networks:
+  medi-net:
+    name: medi-net
+    driver: bridge
+
+  # openlaw-etl 컨테이너들이 속한 외부 docker network.
+  # 운영 기본은 `openlaw-etl_internal`. 다르면 .env.docker에 OPENLAW_NETWORK=<name>.
+  openlaw-net:
+    external: true
+    name: ${OPENLAW_NETWORK:-openlaw-etl_internal}
