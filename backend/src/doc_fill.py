@@ -22,6 +22,8 @@ import json
 import logging
 import os
 import re
+import threading
+import time
 from typing import Any, Optional
 
 _log = logging.getLogger(__name__)
@@ -307,8 +309,12 @@ async def assistant_turn(
     try:
         res = await llm.ainvoke(prompt)
         raw = getattr(res, "content", "")
-    except Exception:  # noqa: BLE001 — 도우미 실패는 안내로 강등
+        if model is None:
+            mark_onprem_ok()
+    except Exception as exc:  # noqa: BLE001 — 도우미 실패는 안내로 강등
         _log.warning("doc assist: 모델 호출 실패", exc_info=True)
+        if model is None:
+            mark_onprem_failure("assist_chat", exc)
         return _assist_fallback_reply(remaining, {}), {}
     obj = _parse_json_object(raw)
     # values 는 문자열 dict 로 정규화돼 나오지만, reply 까지 섞인 평면 파싱일 수
@@ -391,8 +397,9 @@ async def generate_field_value(
     않고(`[확인 필요:]` 마커 유지, 치환은 다운로드 시점) 초안 자체가 마스킹된
     대화 코퍼스에서 생성되므로 본문에 개인정보가 없다.
     """
-    llm = model or _fill_model()
-    if hint and not onprem_fill():
+    use_onprem = onprem_fill()   # 한 번만 읽는다 — 힌트 처리와 모델 선택이 같은 판정을 따르게
+    llm = model or (_fill_model() if use_onprem else _commercial_model())
+    if hint and not use_onprem:
         try:
             from src.guardrail.gate import scrub_input
 
@@ -410,8 +417,12 @@ async def generate_field_value(
     try:
         with assist_slot():
             res = await llm.ainvoke(prompt)
-    except Exception:  # noqa: BLE001
+        if model is None and use_onprem:
+            mark_onprem_ok()
+    except Exception as exc:  # noqa: BLE001
         _log.debug("doc fill generate call failed", exc_info=True)
+        if model is None and use_onprem:
+            mark_onprem_failure("field_fill", exc)
         return None
     raw = getattr(res, "content", "")
     if isinstance(raw, list):
@@ -495,9 +506,99 @@ def draft_context_note(thread_id: str, *, title: str = "") -> Optional[str]:
     )
 
 
-def onprem_fill() -> bool:
-    """서류 기입 모델이 온프레미스인가 — 원문 사용 가부의 **단일 판정**."""
+def onprem_configured() -> bool:
+    """온프레미스 엔드포인트가 **설정**돼 있는가(살아 있는지와 무관)."""
     return bool((os.getenv("DOC_FILL_BASE_URL") or "").strip())
+
+
+# ── 온프레미스 가용성(서킷 브레이커, 2026-09-29) ─────────────────────────
+# 종전엔 설정만 보고 "온프레미스"로 판정해, 서버가 죽어도(8/27~9/29 실측: Mac mini
+# 의 MLX 서버 미기동) 작성 도우미가 매번 호출→실패→안내를 반복했고 운영자는 몰랐다.
+# 실패하면 일정 시간 '다운'으로 보고 그동안 onprem_fill()=False — 호출자는 처음부터
+# 상용·마스킹 경로(또는 503 안내)로 간다. 상태 전이는 운영 알림으로 알린다.
+_ONPREM_DOWN_S = 60.0
+_onprem_lock = threading.Lock()
+_onprem_down_until = 0.0     # time.monotonic() 기준. 0 = 다운 기록 없음
+_onprem_down_since: Optional[float] = None
+
+
+def mark_onprem_failure(where: str, exc: BaseException | None = None) -> None:
+    """온프레미스 호출 실패 — `_ONPREM_DOWN_S` 동안 다운 처리 + 첫 전이에 운영 알림."""
+    global _onprem_down_until, _onprem_down_since
+    with _onprem_lock:
+        first = _onprem_down_since is None
+        _onprem_down_until = time.monotonic() + _ONPREM_DOWN_S
+        if first:
+            _onprem_down_since = time.time()
+    if first:
+        from src.observability.alerts import send_ops_alert
+
+        send_ops_alert(
+            "서식 기입 온프레미스 모델 다운",
+            f"{os.getenv('DOC_FILL_BASE_URL')} ({where}: {type(exc).__name__ if exc else '-'}) — "
+            "작성 도우미 503, 채팅 기입은 마스킹본+상용 폴백(개인정보 칸 미기입·정정 불가)",
+            dedup_key="doc_fill_onprem_down")
+
+
+def mark_onprem_ok() -> None:
+    """온프레미스 호출 성공 — 다운 기록 해제(복구 로그 1회)."""
+    global _onprem_down_until, _onprem_down_since
+    with _onprem_lock:
+        was_down = _onprem_down_since is not None
+        _onprem_down_until, _onprem_down_since = 0.0, None
+    if was_down:
+        _log.warning("doc fill: 온프레미스 모델 복구 — %s", os.getenv("DOC_FILL_BASE_URL"))
+
+
+def reset_onprem_state() -> None:
+    """테스트용 — 브레이커 초기화."""
+    global _onprem_down_until, _onprem_down_since
+    with _onprem_lock:
+        _onprem_down_until, _onprem_down_since = 0.0, None
+
+
+def onprem_down() -> bool:
+    with _onprem_lock:
+        return time.monotonic() < _onprem_down_until
+
+
+def onprem_fill() -> bool:
+    """지금 온프레미스 모델을 쓸 수 있는가 — 원문 사용 가부의 **단일 판정**.
+
+    설정됨 **그리고** 최근 실패로 다운 처리되지 않음. ⚠️ 호출자는 이 값을 **요청당 한 번**
+    읽어 데이터(원문/마스킹본)와 모델(`_fill_model`/`_commercial_model`)을 **같은 값으로**
+    고른다 — 두 번 읽으면 그 사이 상태가 바뀌어 원문이 상용 모델로 갈 수 있다.
+    """
+    return onprem_configured() and not onprem_down()
+
+
+def _commercial_model():
+    """상용 기입 모델 — 온프레미스를 못 쓸 때. 온프레미스 미설정이면 종전 기본(`_fill_model`)."""
+    if not onprem_configured():
+        return _fill_model()
+    from src.models import build_chat_model
+
+    # DOC_FILL_MODEL 은 온프레미스 모델명이라 여기선 쓰지 않는다.
+    return build_chat_model(
+        os.getenv("SUBAGENT_MODEL") or "anthropic:claude-haiku-4-5-20251001",
+        max_tokens=600)
+
+
+def probe_onprem() -> tuple[bool, Optional[str]]:
+    """`/readyz` 용 능동 점검 — 결과를 브레이커에도 반영한다. 미설정이면 (True, 사유)."""
+    base = (os.getenv("DOC_FILL_BASE_URL") or "").strip()
+    if not base:
+        return True, "온프레미스 미설정(상용·마스킹본 처리)"
+    import httpx
+
+    timeout = float((os.getenv("READYZ_PROBE_TIMEOUT_S") or "").strip() or "4")
+    try:
+        httpx.get(base.rstrip("/") + "/models", timeout=timeout).raise_for_status()
+    except Exception as e:
+        mark_onprem_failure("readyz", e)
+        raise
+    mark_onprem_ok()
+    return True, None
 
 
 async def run_turn_fill(thread_id: str, user_text: str, emit,
@@ -528,7 +629,9 @@ async def run_turn_fill(thread_id: str, user_text: str, emit,
         try:
             values = await match_turn_to_fields(
                 raw_text, state["remaining"], strict=True, filled=prior)
-        except Exception:  # noqa: BLE001 — 엔드포인트 장애·타임아웃
+            mark_onprem_ok()
+        except Exception as exc:  # noqa: BLE001 — 엔드포인트 장애·타임아웃
+            mark_onprem_failure("chat_turn", exc)
             # 폴백은 **마스킹본 + 상용 모델**. 개인정보 칸은 못 채우지만
             # 나머지는 계속 채워진다(전면 중단보다 낫다). 조용히 넘어가면
             # 안 되는 상황이라 warning — 임시 구성의 알려진 위험이다
@@ -541,16 +644,13 @@ async def run_turn_fill(thread_id: str, user_text: str, emit,
                 os.getenv("DOC_FILL_BASE_URL"), exc_info=True)
             if not state["remaining"]:
                 return  # 폴백으로 할 수 있는 일(미기입 채우기)이 없다
-            from src.models import build_chat_model
-
-            fb = build_chat_model(
-                os.getenv("SUBAGENT_MODEL")
-                or "anthropic:claude-haiku-4-5-20251001", max_tokens=600)
             values = await match_turn_to_fields(
-                user_text, state["remaining"], model=fb)
+                user_text, state["remaining"], model=_commercial_model())
     else:
-        # 상용 기본 경로(온프레미스 미설정) — 마스킹본, 정정 없음(위 정책).
-        values = await match_turn_to_fields(user_text, state["remaining"])
+        # 상용 경로(온프레미스 미설정·다운 처리 중) — 마스킹본, 정정 없음(위 정책).
+        # 모델도 명시 상용 — `_fill_model()` 은 설정만 보고 죽은 온프레미스를 고른다.
+        values = await match_turn_to_fields(
+            user_text, state["remaining"], model=_commercial_model())
     if not values:
         return
     from src.persistence import get_reports_repo

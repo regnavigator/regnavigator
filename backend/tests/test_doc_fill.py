@@ -537,3 +537,131 @@ async def test_assistant_turn_includes_attachment():
         model=_M(), attachment_text="사업자등록증\n상호: (주)메디텍")
     assert "첨부 문서" in seen["p"] and "(주)메디텍" in seen["p"]
     assert values == {"명칭(상호)": "(주)메디텍"}
+
+
+# ── 온프레미스 가용성 브레이커 (2026-09-29) ─────────────────────────────
+#
+# 실측: Mac mini MLX 서버가 꺼진 채(8/27 이후 기입 성공 0) 설정만 남아 있어,
+# 작성 도우미가 매번 호출→실패를 반복했고 아무도 몰랐다.
+
+
+def test_breaker_marks_down_alerts_once_and_recovers(monkeypatch):
+    import src.doc_fill as df
+
+    monkeypatch.setenv("DOC_FILL_BASE_URL", "http://onprem/v1")
+    alerts = []
+    monkeypatch.setattr("src.observability.alerts.send_ops_alert",
+                        lambda *a, **k: alerts.append((a, k)))
+    assert df.onprem_fill() is True
+    df.mark_onprem_failure("t", RuntimeError("refused"))
+    df.mark_onprem_failure("t", RuntimeError("refused"))
+    assert df.onprem_configured() is True
+    assert df.onprem_fill() is False, "다운 처리 중엔 온프레미스를 쓰지 않는다"
+    assert len(alerts) == 1, "다운 전이는 알림 1회"
+    df.mark_onprem_ok()
+    assert df.onprem_fill() is True
+
+
+@pytest.mark.asyncio
+async def test_down_chat_fill_goes_commercial_with_masked_text(tmp_path, monkeypatch):
+    """다운 처리 중이면 온프레미스를 **부르지도 않고** 상용·마스킹본으로 간다."""
+    import src.doc_fill as df
+
+    _seed_draft(tmp_path, thread_id="t_down")
+    monkeypatch.setenv("DOC_FILL_BASE_URL", "http://dead/v1")
+    monkeypatch.setattr("src.observability.alerts.send_ops_alert", lambda *a, **k: None)
+    df.mark_onprem_failure("t", RuntimeError("refused"))
+    seen = []
+
+    class _Dead:
+        async def ainvoke(self, prompt, cfg=None):
+            raise AssertionError("다운 처리 중 온프레미스를 불렀다")
+
+    class _Comm:
+        async def ainvoke(self, prompt, cfg=None):
+            seen.append(prompt)
+
+            class _R:
+                content = json.dumps({"연구 기간": "1년"}, ensure_ascii=False)
+            return _R()
+
+    monkeypatch.setattr("src.doc_fill._fill_model", lambda: _Dead())
+    monkeypatch.setattr("src.models.build_chat_model", lambda *a, **k: _Comm())
+    events = []
+    await run_turn_fill("t_down", "[이름] 연구, 기간은 1년", events.append,
+                        raw_text="홍길동 연구, 기간은 1년")
+    assert seen and "홍길동" not in seen[-1], "상용 경로에 원문이 샜다"
+    assert events and events[0]["type"] == "document_update"
+
+
+def test_assist_route_503_while_down(tmp_path, monkeypatch):
+    import src.doc_fill as df
+    from fastapi.testclient import TestClient
+    from src.api import app
+
+    _seed_draft(tmp_path, thread_id="t_assist_down")
+    monkeypatch.setenv("DOC_FILL_BASE_URL", "http://dead/v1")
+    monkeypatch.setattr("src.observability.alerts.send_ops_alert", lambda *a, **k: None)
+    df.mark_onprem_failure("t", RuntimeError("refused"))
+    r = TestClient(app).post("/documents/rep-doc/chat", json={"message": "성명은 홍길동"})
+    assert r.status_code == 503
+    assert "직접 입력" in r.json()["detail"]
+
+
+def test_readyz_probe_feeds_breaker(monkeypatch):
+    import httpx
+    import src.doc_fill as df
+
+    monkeypatch.setenv("DOC_FILL_BASE_URL", "http://onprem/v1")
+    monkeypatch.setattr("src.observability.alerts.send_ops_alert", lambda *a, **k: None)
+
+    def _refused(*a, **k):
+        raise httpx.ConnectError("refused")
+
+    monkeypatch.setattr(httpx, "get", _refused)
+    with pytest.raises(httpx.ConnectError):
+        df.probe_onprem()
+    assert df.onprem_fill() is False
+
+    class _Ok:
+        def raise_for_status(self):
+            return None
+
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: _Ok())
+    assert df.probe_onprem() == (True, None)
+    assert df.onprem_fill() is True
+
+    monkeypatch.delenv("DOC_FILL_BASE_URL")
+    ok, detail = df.probe_onprem()
+    assert ok and "미설정" in detail
+
+
+@pytest.mark.asyncio
+async def test_sparkle_hint_scrubbed_and_commercial_while_down(monkeypatch):
+    """✨ 힌트 — 다운 중엔 스크럽 + 상용 모델. 판정과 모델이 어긋나면 원문이 상용으로 간다."""
+    import src.doc_fill as df
+    from src.doc_fill import generate_field_value
+
+    monkeypatch.setenv("DOC_FILL_BASE_URL", "http://dead/v1")
+    monkeypatch.setattr("src.observability.alerts.send_ops_alert", lambda *a, **k: None)
+    df.mark_onprem_failure("t", RuntimeError("refused"))
+    seen = []
+
+    class _Dead:
+        async def ainvoke(self, prompt, cfg=None):
+            raise AssertionError("다운 처리 중 온프레미스를 불렀다")
+
+    class _Comm:
+        async def ainvoke(self, prompt, cfg=None):
+            seen.append(prompt)
+
+            class _R:
+                content = "값"
+            return _R()
+
+    monkeypatch.setattr("src.doc_fill._fill_model", lambda: _Dead())
+    monkeypatch.setattr("src.models.build_chat_model", lambda *a, **k: _Comm())
+    monkeypatch.setattr("src.guardrail.gate.scrub_input",
+                        lambda t, collect=None: (t.replace("홍길동", "[이름]"), []))
+    await generate_field_value("본문", "성명", hint="성명은 홍길동")
+    assert seen and "홍길동" not in seen[-1] and "[이름]" in seen[-1]

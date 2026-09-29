@@ -108,6 +108,13 @@ def _check_report_writer():
     return True, None
 
 
+def _check_doc_fill():
+    """서식 기입 온프레미스 모델(원문 처리) — 결과는 기입 경로의 서킷 브레이커에도 반영된다."""
+    from src.doc_fill import probe_onprem
+
+    return probe_onprem()
+
+
 # (name, fn, critical) — critical=True 면 다운 시 전체 readiness 실패(503).
 # DGX 가드레일·writer 는 **non-critical**: 다운해도 graceful degradation 으로 대화는
 # 계속된다(품질만 저하). 하지만 **보이게** 해야 운영자가 복구한다(SPOF 수용의 전제).
@@ -118,6 +125,7 @@ _PROBES = [
     ("pii_ner", _check_pii_ner, False),       # 다운 → regex-only(이름·주소 미탐)
     ("intent", _check_intent, False),         # 다운 → 휴리스틱(검색강제 기본값)
     ("report_writer", _check_report_writer, False),  # 다운 → 보고서만 영향
+    ("doc_fill", _check_doc_fill, False),     # 다운 → 작성 도우미 503·개인정보 칸 미기입
 ]
 
 

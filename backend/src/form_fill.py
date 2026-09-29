@@ -241,12 +241,20 @@ async def map_values_to_labels(labels: list[str], filled: dict,
     if model is None and not onprem_fill():
         _log.info("form label mapping: 온프레미스 미설정 — LLM 보강 생략")
         return mapping
+    from src.doc_fill import mark_onprem_failure, mark_onprem_ok
     try:
         from src.doc_fill import _fill_model, _parse_json_object
         llm = model or _fill_model()
-        res = await llm.ainvoke(_MAP_PROMPT.format(
-            labels=json.dumps(rest_labels, ensure_ascii=False),
-            values=json.dumps(rest_values, ensure_ascii=False)))
+        try:
+            res = await llm.ainvoke(_MAP_PROMPT.format(
+                labels=json.dumps(rest_labels, ensure_ascii=False),
+                values=json.dumps(rest_values, ensure_ascii=False)))
+        except Exception as exc:
+            if model is None:
+                mark_onprem_failure("form_label_mapping", exc)
+            raise
+        if model is None:
+            mark_onprem_ok()
         extra = _parse_json_object(getattr(res, "content", ""))
         allowed_vals = {str(v) for v in rest_values.values()}
         for lb, v in extra.items():

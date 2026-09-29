@@ -40,6 +40,9 @@ def _isolate_env(monkeypatch, tmp_path):
     _clear_persistence_caches()
     _reset_rate_limit_windows()
     _clear_ner_caches()
+    # 서식 기입 온프레미스 브레이커는 모듈 전역 — 한 테스트의 '다운'이 다음으로 새지 않게.
+    from src.doc_fill import reset_onprem_state
+    reset_onprem_state()
     yield
     _clear_retrieval_caches()
     _reset_rate_limit_windows()
