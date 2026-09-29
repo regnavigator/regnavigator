@@ -8,7 +8,7 @@
 > **현행**: 보고서는 `POST /reports` + `idempotency_key(^rpt_…)` 로 트리거되고 **채팅과
 > 완전히 분리·병렬**로 돌며, 대화록에 아무것도 append 하지 않는다(사이드바·우측 패널·
 > 이메일 첨부로만 전달). 구조는 [`ARCHITECTURE.md`](./ARCHITECTURE.md) §7, 계약은
-> medi-back `docs/frontend_chat_v2.md` §4, 최신 변경은 [`PATCHNOTE.md`](./PATCHNOTE.md).
+> medi-back `docs/contracts/frontend_chat_v2.md` §4, 최신 변경은 [`PATCHNOTE.md`](./PATCHNOTE.md).
 
 ---
 

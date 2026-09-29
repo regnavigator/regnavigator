@@ -4,7 +4,7 @@
 # 인증 DB: 2026-07-15부터 Postgres(medi-back의 medi-postgres 인스턴스 내 별도
 #   DB `medi_auth`). DATABASE_URL은 postgresql://medi:***@postgres:5432/medi_auth.
 #   백업은 medi-back의 medi-backup(pg_dump)이 medi_auth까지 커버.
-#   최초 컷오버(DB 생성·SQLite 데이터 이관) 런북: docs/archive/auth_db_postgres_migration.md
+#   SQLite→PG 이관 런북은 2026-07-15 컷오버 완료 후 삭제(git log -- docs/archive)
 #
 # 기동 순서: medi-front-migrate(prisma migrate deploy, 1회 실행 후 종료)가 성공해야
 #   medi-front가 뜬다(depends_on service_completed_successfully). 스키마 없는 채로

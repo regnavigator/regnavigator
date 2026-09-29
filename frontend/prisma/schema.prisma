@@ -1,7 +1,7 @@
 // NextAuth + EmailProvider 표준 schema.
 // 2026-07-15: 인증 DB를 Postgres로 통합(medi-back과 같은 medi-postgres 인스턴스의
-// 별도 DB `medi_auth`). 구 SQLite(베타)는 백업 부재로 은퇴 — 이관 런북은
-// docs/auth_db_postgres_migration.md. dev도 동일 provider(로컬 PG 또는 컨테이너).
+// 별도 DB `medi_auth`). 구 SQLite(베타)는 백업 부재로 은퇴 — 이관 런북은 컷오버 완료 후
+// 삭제(git log -- docs/archive). dev도 동일 provider(로컬 PG 또는 컨테이너).
 
 generator client {
   provider = "prisma-client-js"

@@ -95,7 +95,7 @@ types/
   - `lib/parse/deep.ts` (classifyStage)
   - `lib/parse/lawLink.ts` (deriveExternalUrl)
   - `lib/store/turns.ts` reducer들
-- **E2E** — Playwright + `E2E_SCENARIOS.md` 시나리오 자동화
+- **E2E** — Playwright 로 핵심 흐름(로그인·채팅·보고서) 자동화
 - CI: PR마다 자동 실행
 
 ### 10. 검색 기능

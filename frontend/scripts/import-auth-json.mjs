@@ -5,7 +5,7 @@
  * SQLite 읽기는 sqlite3 CLI가 담당(런북에서 JSON export). 이 스크립트는 그 JSON을
  * 받아 FK 순서로 upsert(멱등 — 재실행 안전).
  *
- * 사전(런북 docs/auth_db_postgres_migration.md 참조):
+ * 사전(SQLite→PG 이관 런북은 2026-07-15 컷오버 완료 후 삭제(git log -- docs/archive)):
  *   mkdir -p auth-export
  *   for T in User Account Session VerificationToken; do
  *     sqlite3 -json prod.db "SELECT * FROM \"$T\";" > "auth-export/$T.json"
