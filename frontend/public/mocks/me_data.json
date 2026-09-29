@@ -1,0 +1,12 @@
+{
+  "user": { "id": "mock-user", "email": "mock@example.com", "created_at": "2026-05-01T00:00:00Z" },
+  "consent": { "version": "2026-07-09", "agreed_at": "2026-07-09T00:00:00Z", "scopes": ["terms", "transfer"] },
+  "counts": { "events": 42 },
+  "retention": {
+    "대화 체크포인트": "90일(비활성 기준)",
+    "보고서 전문(.md)": "30일 — 이후 파일 삭제, 메타(제목·인용)는 보존",
+    "회원 정보": "탈퇴 시 지체 없이 파기"
+  },
+  "국외이전": ["Anthropic(미국)", "OpenAI(미국)", "Tavily(미국)", "LangSmith(미국)"],
+  "notice": "상세는 GET /legal 및 개인정보처리방침 참조"
+}

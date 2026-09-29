@@ -1,0 +1,8 @@
+{
+  "current_version": "2026-07-09",
+  "agreed_version": "2026-07-09",
+  "agreed_at": "2026-07-09T00:00:00Z",
+  "agreed_scopes": ["terms", "transfer"],
+  "required_scopes": ["terms", "transfer"],
+  "needs_consent": false
+}

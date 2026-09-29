@@ -1,0 +1,23 @@
+{
+  "name": "MediReg — 의료 규제 AI 상담",
+  "short_name": "MediReg",
+  "description": "법령·별표/서식·판례 근거 기반 의료 규제 AI 상담",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F7FAF8",
+  "theme_color": "#0F6B4A",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

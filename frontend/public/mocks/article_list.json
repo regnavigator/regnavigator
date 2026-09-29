@@ -1,0 +1,11 @@
+{
+  "count": 6,
+  "items": [
+    { "article_key": "009705_0001001", "article_num": "제1조", "title": "목적" },
+    { "article_key": "009705_0002001", "article_num": "제2조", "title": "정의" },
+    { "article_key": "009705_0025001", "article_num": "제25조", "title": "광고의 사전심의" },
+    { "article_key": "009705_0026001", "article_num": "제26조", "title": "광고의 금지" },
+    { "article_key": "009705_0052001", "article_num": "제52조", "title": "벌칙" },
+    { "article_key": "009705_0053001", "article_num": "제53조", "title": "양벌규정" }
+  ]
+}
