@@ -73,3 +73,6 @@ research/runs/
 
 # 로컬 가상환경
 .venv/
+
+# 로컬 dev DB
+regnav_dev.db*
