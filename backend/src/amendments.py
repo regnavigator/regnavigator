@@ -55,15 +55,20 @@ def _index_by_article_key(bookmarks: Iterable) -> dict[str, dict]:
     return out
 
 
-def detect(bookmarks: Iterable) -> list[dict]:
-    """북마크 목록 → 변경이 감지된 항목만.
+def detect_with_status(bookmarks: Iterable) -> tuple[list[dict], dict]:
+    """`detect` + **조회 완전성**.
 
-    반환 각 항목: {bookmark_id, citation_id, title, saved_date, folder,
-                   kind: "repealed"|"pending"|"amended", current_date?}
+    두 축 중 하나라도 실패하면 "변경 없음"과 "확인 못 함"을 구분할 수 없다 —
+    고객사 리포트가 DB 다운 중에 '변경 없음'이라고 단언하면 안 되므로
+    상태를 함께 돌려준다(2026-10-01).
+
+    status: {checked, amendment_status_ok, articles_ok, complete}
     """
     key_to = _index_by_article_key(bookmarks)
+    status = {"checked": len(key_to), "amendment_status_ok": True,
+              "articles_ok": True, "complete": True}
     if not key_to:
-        return []
+        return [], status
 
     out: list[dict] = []
     flagged: set[str] = set()
@@ -81,6 +86,7 @@ def detect(bookmarks: Iterable) -> list[dict]:
                 flagged.add(ak)
     except Exception as e:  # noqa: BLE001 — enrich 미가용 시 시행일 비교만
         _log.warning("amendment status 조회 실패: %s", e)
+        status["amendment_status_ok"] = False
 
     # 2) 시행일 비교 — 위에서 안 걸린 것만
     try:
@@ -90,6 +96,7 @@ def detect(bookmarks: Iterable) -> list[dict]:
                               medical_filter=False)
     except Exception as e:  # noqa: BLE001 — PG 조회 실패는 이 축만 스킵(비차단)
         _log.warning("amendments fetch 실패: %s", e)
+        status["articles_ok"] = False
         rows = {}
 
     for ak, info in key_to.items():
@@ -104,4 +111,10 @@ def detect(bookmarks: Iterable) -> list[dict]:
         if cur_s and saved and cur_s != str(saved):
             out.append({**info, "kind": "amended", "current_date": cur_s})
 
-    return out
+    status["complete"] = status["amendment_status_ok"] and status["articles_ok"]
+    return out, status
+
+
+def detect(bookmarks: Iterable) -> list[dict]:
+    """변경 항목만 — 개인 조회(`GET /bookmarks/amendments`)용 얇은 래퍼."""
+    return detect_with_status(bookmarks)[0]

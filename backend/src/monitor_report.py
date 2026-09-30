@@ -22,7 +22,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from src.amendments import KIND_LABELS, detect as detect_amendments
+from src.amendments import KIND_LABELS, detect_with_status as detect_amendments
 from src.persistence import get_bookmarks_repo, get_monitor_targets_repo, parse_recipients
 
 _log = logging.getLogger(__name__)
@@ -50,7 +50,7 @@ def collect(target) -> dict:
     """대상 폴더의 북마크를 훑어 변경분을 모은다. 실패해도 예외를 올리지 않는다."""
     bms = get_bookmarks_repo().list_for_user(target.user_id, limit=500)
     scoped = [b for b in bms if (getattr(b, "folder", None) or "") == target.folder]
-    changes = detect_amendments(scoped)
+    changes, status = detect_amendments(scoped)
     changes.sort(key=lambda c: (_ORDER.get(c.get("kind"), 9), str(c.get("title") or "")))
     counts = {k: sum(1 for c in changes if c.get("kind") == k) for k in KIND_LABELS}
     return {
@@ -58,6 +58,9 @@ def collect(target) -> dict:
         "watched": len(scoped),
         "changes": changes,
         "counts": counts,
+        # 법령 DB 조회가 불완전하면 "변경 없음"이라고 단언할 수 없다.
+        "degraded": not status.get("complete", True),
+        "check_status": status,
         "generated_at": datetime.now(_kst()).isoformat(timespec="minutes"),
     }
 
@@ -68,6 +71,8 @@ def subject_of(data: dict) -> str:
     name = data["target"]["display_name"]
     n = len(data["changes"])
     today = datetime.now(_kst()).strftime("%Y-%m-%d")
+    if data.get("degraded"):
+        return f"[규제 모니터링] {name} — 변경 {n}건 · 일부 확인 불가 ({today})"
     return (f"[규제 모니터링] {name} — 변경 {n}건 ({today})" if n
             else f"[규제 모니터링] {name} — 변경 없음 ({today})")
 
@@ -98,6 +103,17 @@ def _rows_html(changes: list[dict]) -> str:
     return "".join(out)
 
 
+def _degraded_banner(data: dict) -> str:
+    """법령 DB 조회가 불완전했음을 본문 최상단에 명시 — 침묵하면 오해를 만든다."""
+    if not data.get("degraded"):
+        return ""
+    return (f'<div style="margin:12px 20px 0;padding:9px 11px;border-radius:5px;'
+            f'background:#FDF3F3;border:1px solid {_C["warn"]};color:{_C["warn"]};'
+            f'font-size:12px;line-height:1.5"><b>일부 항목을 확인하지 못했습니다.</b> '
+            f'법령 데이터베이스 조회가 실패해, 아래 목록에 빠진 변경이 있을 수 있습니다. '
+            f'다음 주기에 다시 확인합니다.</div>')
+
+
 def render_html(data: dict) -> str:
     t = data["target"]
     counts = data["counts"]
@@ -112,6 +128,7 @@ border-radius:8px;overflow:hidden">
     <div style="font-size:13px;color:{_C['sub']};margin-top:3px">
       {html.escape(t['display_name'])} · 관찰 {data['watched']}건 · {html.escape(data['generated_at'])}</div>
   </div>
+  {_degraded_banner(data)}
   <div style="padding:14px 20px 4px">
     <div style="font-size:13px;color:{_C['sub']}">
       {html.escape(chips) if chips else '이번 주기에는 감지된 변경이 없습니다.'}</div>
@@ -174,10 +191,18 @@ def send(target, *, to: Optional[list[str]] = None, force: bool = False) -> dict
     from src.observability.notifications import is_configured, send_email
 
     b = build(target)
-    n = len(b["data"]["changes"])
+    data = b["data"]
+    n = len(data["changes"])
+    if n == 0 and data.get("degraded") and not force:
+        # 조회가 불완전한 채 "변경 없음"을 보내면 거짓 안심을 준다 — 보내지 않고
+        # last_sent_at 도 남기지 않아 다음 점검에 다시 시도한다.
+        return {"target_id": target.id, "skipped": "degraded", "changes": 0,
+                "degraded": True, "sent": [], "failed": [],
+                "smtp_configured": is_configured()}
     if n == 0 and not force and not _cfg_flag("MONITOR_REPORT_SEND_ON_NO_CHANGE"):
         return {"target_id": target.id, "skipped": "no_change", "changes": 0,
-                "sent": [], "failed": [], "smtp_configured": is_configured()}
+                "degraded": False, "sent": [], "failed": [],
+                "smtp_configured": is_configured()}
 
     targets = to or parse_recipients(target.recipients)
     sent, failed = [], []
@@ -189,9 +214,37 @@ def send(target, *, to: Optional[list[str]] = None, force: bool = False) -> dict
             _log.exception("monitor_report 발송 실패 target=%s to=%s", target.id, addr)
             ok = False
         (sent if ok else failed).append(addr)
-    return {"target_id": target.id, "subject": b["subject"], "changes": n,
-            "sent": sent, "failed": failed, "smtp_configured": is_configured(),
-            "attachments": [a[0] for a in b["attachments"]]}
+    result = {"target_id": target.id, "subject": b["subject"], "changes": n,
+              "degraded": bool(data.get("degraded")), "sent": sent, "failed": failed,
+              "smtp_configured": is_configured(),
+              "attachments": [a[0] for a in b["attachments"]]}
+    _emit_event(target, result, data)
+    return result
+
+
+def _emit_event(target, result: dict, data: dict) -> None:
+    """발송 결과를 events 에 남긴다 — 관리자 통계·감사용. best-effort."""
+    try:
+        import json as _json
+
+        from src.persistence import get_events_repo
+        from src.persistence.events_repo import Event
+
+        get_events_repo().emit(Event(
+            id="", ts=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            event_type="monitor_report", user_id=target.user_id,
+            payload_json=_json.dumps({
+                # 고객사명(folder)은 싣지 않는다 — 로펌 고객사 식별정보를 이벤트
+                # 로그에 중복 보관하지 않기 위함. 필요하면 target_id 로 역참조한다.
+                "target_id": target.id, "cadence": target.cadence,
+                "changes": result.get("changes"), "counts": data.get("counts"),
+                "watched": data.get("watched"), "degraded": result.get("degraded"),
+                "sent": len(result.get("sent") or []),
+                "failed": len(result.get("failed") or []),
+            }, ensure_ascii=False),
+        ))
+    except Exception:  # noqa: BLE001 — 적재 실패가 발송을 되돌리면 안 된다
+        _log.warning("[monitor_report] 이벤트 적재 실패 target=%s", target.id, exc_info=True)
 
 
 # ── 스케줄 ──────────────────────────────────────────────────────────────────
@@ -258,6 +311,11 @@ def run_due(now: Optional[datetime] = None) -> list[dict]:
             _log.exception("[monitor_report] target=%s 발송 실패", t.id)
             continue
         # 변경 0건으로 생략한 경우에도 '이번 주기는 처리됨'으로 표시해 반복 점검을 막는다.
+        if r.get("skipped") == "degraded":
+            _log.warning("[monitor_report] %s 조회 불완전 — 발송 보류, 다음 점검에 재시도",
+                         t.folder)
+            results.append(r)
+            continue
         if r.get("sent") or r.get("skipped") == "no_change":
             repo.mark_sent(t.id, eff.isoformat(timespec="seconds"))
             _log.info("[monitor_report] %s → %s (변경 %s건)",

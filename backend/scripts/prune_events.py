@@ -81,6 +81,7 @@ METRIC_TYPES = (
     "report_deleted",
     # 진행 중 보고서 사용자 중단(2026-09-02) — payload 없음, 빈도 관측용.
     "report_cancelled",
+    "monitor_report",   # 고객사 리포트 발송 결과(건수·성패). 고객사명은 싣지 않는다
 )
 
 # 증빙 — 절대 건드리지 않는다(감사추적).
