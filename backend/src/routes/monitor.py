@@ -150,6 +150,8 @@ def preview_target(target_id: str, request: Request):
     return {"subject": b["subject"], "html": b["html"], "text": b["text"],
             "changes": b["data"]["changes"], "counts": b["data"]["counts"],
             "watched": b["data"]["watched"],
+            "degraded": b["data"].get("degraded", False),
+            "check_status": b["data"].get("check_status"),
             "generated_at": b["data"]["generated_at"]}
 
 

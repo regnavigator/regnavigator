@@ -350,3 +350,34 @@ def test_event_failure_does_not_break_send(monkeypatch):
     monkeypatch.setattr("src.persistence.get_events_repo", boom)
     r = mr.send(_target(user_id="uev2", folder="이벤트실패"))
     assert r["sent"], "이벤트 적재 실패가 발송을 되돌리면 안 된다"
+
+
+def test_detect_marks_incomplete_when_law_db_unavailable(monkeypatch):
+    """pg_client 는 실패를 {} 로 삼킨다 — 가용성을 먼저 봐야 '확인 불가'를 안다."""
+    from src import amendments
+
+    bms = get_bookmarks_repo()
+    bms.create(_bookmark("unodb", "DB없음", "007777_0001001", "2026-01-01"))
+    scoped = [b for b in bms.list_for_user("unodb") if b.folder == "DB없음"]
+
+    monkeypatch.setattr("src.retrieval.pg_client.is_available", lambda: False)
+    changes, status = amendments.detect_with_status(scoped)
+    assert changes == []
+    assert status["complete"] is False, "DB 미가용인데 '변경 없음'으로 단언하면 안 된다"
+
+
+def test_detect_proceeds_when_law_db_available(monkeypatch):
+    from src import amendments
+
+    bms = get_bookmarks_repo()
+    bms.create(_bookmark("uyesdb", "DB있음", "008888_0001001", "2026-01-01"))
+    scoped = [b for b in bms.list_for_user("uyesdb") if b.folder == "DB있음"]
+
+    monkeypatch.setattr("src.retrieval.pg_client.is_available", lambda: True)
+    monkeypatch.setattr("src.retrieval.pg_client.fetch_amendment_status", lambda _ids: {})
+    monkeypatch.setattr("src.retrieval.pg_client.fetch_articles",
+                        lambda _keys, **kw: {"008888_0001001": {"enforce_date": "2026-09-01"}})
+    changes, status = amendments.detect_with_status(scoped)
+    assert status["complete"] is True
+    assert [c["kind"] for c in changes] == ["amended"]
+    assert changes[0]["current_date"] == "2026-09-01"

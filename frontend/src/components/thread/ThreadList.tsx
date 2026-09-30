@@ -524,6 +524,17 @@ export function ThreadList({ configured, refreshKey, onError, onCollapse, onOpen
           </span>
           저장한 근거
         </button>
+        {/* 고객사 규제 모니터링 — 저장한 근거를 폴더(고객사)별로 묶어 개정 감지·정기 리포트. */}
+        <Link
+          href="/monitor"
+          title="고객사별 규제 모니터링 — 개정 감지 리포트 설정"
+          className="mb-1 flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-[12px] font-medium text-md-on-surface-variant transition-colors hover:bg-md-surface-container hover:text-md-on-surface"
+        >
+          <span className="material-symbols-outlined text-[15px]" aria-hidden>
+            monitoring
+          </span>
+          고객사 모니터링
+        </Link>
         {/* 이용 안내 — 한 칸(2026-08-27 요청). 행 클릭=매뉴얼(/guide),
             오른쪽 나침반 아이콘=30초 화면 투어. */}
         {/* hover 는 각자 — 행 전체 배경을 걸면 둘러보기에 올렸는데 이용

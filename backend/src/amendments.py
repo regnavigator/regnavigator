@@ -70,6 +70,20 @@ def detect_with_status(bookmarks: Iterable) -> tuple[list[dict], dict]:
     if not key_to:
         return [], status
 
+    # 법령 PG 가 아예 없으면 두 축 모두 확인 불가다. pg_client 가 실패를 {} 로
+    # 삼키므로 예외만 믿으면 "변경 없음"으로 잘못 단언하게 된다.
+    try:
+        from src.retrieval.pg_client import is_available as _law_db_available
+
+        if not _law_db_available():
+            _log.warning("법령 PG 미가용 — 개정 감지를 건너뛴다(확인 불가로 표시)")
+            status.update(amendment_status_ok=False, articles_ok=False, complete=False)
+            return [], status
+    except Exception as e:  # noqa: BLE001 — 판정 실패도 '확인 불가'
+        _log.warning("법령 PG 가용성 판정 실패: %s", e)
+        status.update(amendment_status_ok=False, articles_ok=False, complete=False)
+        return [], status
+
     out: list[dict] = []
     flagged: set[str] = set()
 

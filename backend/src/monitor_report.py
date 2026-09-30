@@ -114,6 +114,13 @@ def _degraded_banner(data: dict) -> str:
             f'다음 주기에 다시 확인합니다.</div>')
 
 
+def _empty_note(data: dict) -> str:
+    """변경 0건 안내 — 조회가 불완전하면 '없다'고 말하지 않는다(배너와 모순)."""
+    if data.get("degraded"):
+        return "확인된 변경은 없습니다. 위 안내를 함께 보십시오."
+    return "이번 주기에는 감지된 변경이 없습니다."
+
+
 def render_html(data: dict) -> str:
     t = data["target"]
     counts = data["counts"]
@@ -131,7 +138,7 @@ border-radius:8px;overflow:hidden">
   {_degraded_banner(data)}
   <div style="padding:14px 20px 4px">
     <div style="font-size:13px;color:{_C['sub']}">
-      {html.escape(chips) if chips else '이번 주기에는 감지된 변경이 없습니다.'}</div>
+      {html.escape(chips) if chips else _empty_note(data)}</div>
   </div>
   <table style="width:100%;border-collapse:collapse;font-size:13px;margin:8px 0 4px">
     {_rows_html(data['changes'])}

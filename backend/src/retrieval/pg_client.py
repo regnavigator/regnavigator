@@ -39,6 +39,19 @@ def close_pool() -> None:
         pass
 
 
+def is_available() -> bool:
+    """법령 PG 를 실제로 쓸 수 있는가 — 미설정·드라이버 없음·풀 생성 실패면 False.
+
+    이 모듈의 조회 함수들은 실패를 `{}` 로 **삼킨다**. 그래서 호출자가 "결과 없음"과
+    "조회 못 함"을 구분하려면 이걸 먼저 봐야 한다. 개정 감지 리포트가 DB 다운 중에
+    '변경 없음'이라고 단언하는 사고를 막기 위해 공개했다(2026-10-01).
+    """
+    try:
+        return _get_pool() is not None
+    except Exception:  # noqa: BLE001 — 판정 자체가 죽으면 '못 씀'으로 본다
+        return False
+
+
 def _get_pool():
     """psycopg ConnectionPool — lazy init.
 
