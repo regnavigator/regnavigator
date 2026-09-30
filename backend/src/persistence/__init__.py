@@ -39,6 +39,10 @@ from .feedback_repo import (
     PostgresFeedbackRepo,
     SqliteFeedbackRepo,
 )
+from .monitor_targets_repo import (  # noqa: F401
+    MonitorTarget, MonitorTargetsRepo, PostgresMonitorTargetsRepo,
+    SqliteMonitorTargetsRepo, parse_recipients,
+)
 from .bookmarks_repo import (
     Bookmark,
     BookmarksRepo,
@@ -136,6 +140,15 @@ def get_bookmarks_repo() -> BookmarksRepo:
         return PostgresBookmarksRepo(dsn=os.environ["REPORTS_PG_DSN"])
     if _backend() == "sqlite":
         return SqliteBookmarksRepo(path=_sqlite_path())
+    raise ValueError(f"Unknown REPORTS_BACKEND: {_backend()!r}")
+
+
+@lru_cache(maxsize=1)
+def get_monitor_targets_repo() -> MonitorTargetsRepo:
+    if _backend() == "postgres":
+        return PostgresMonitorTargetsRepo(dsn=os.environ["REPORTS_PG_DSN"])
+    if _backend() == "sqlite":
+        return SqliteMonitorTargetsRepo(path=_sqlite_path())
     raise ValueError(f"Unknown REPORTS_BACKEND: {_backend()!r}")
 
 

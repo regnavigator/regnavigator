@@ -371,3 +371,13 @@ MEDIREG AI 는 의사·RA/QA·인허가 컨설턴트를 위한 **한국어 의�
 - 출처 원문 링크 + 법령정보센터 분야별 deep-link, fast/deep 디스패치(자동 → 사용자 명시 CTA 로 전환),
   채팅 슬림화(단계 카드 접힘·References 아코디언), 디자인 톤 정리.
 - 백엔드는 5월 초 저장소를 새로 시작했다(이전 이력은 시크릿 노출 사고로 정리 — 키는 회전 권고).
+
+## 2026-10-01 — 고객사 규제 모니터링 리포트
+
+- **신규** `/monitor/targets` CRUD · `/preview` · `/send` — 고객사(=북마크 폴더)별 배송 설정.
+- **신규** `monitor_targets` 테이블(SQLite/PG), `src/monitor_report.py`(수집·렌더·발송),
+  `_monitor_report_loop`(주기 점검, `MONITOR_REPORT_CHECK_INTERVAL_S`).
+- **리팩터** 북마크 개정 판정을 `src/routes/bookmarks.py` → `src/amendments.py` 로 이관.
+  `GET /bookmarks/amendments` 응답은 그대로(+`folder` 필드 추가).
+- 변경 0건이면 발송 생략(`MONITOR_REPORT_SEND_ON_NO_CHANGE` 로 변경 가능).
+- 테스트 23건 추가(`tests/test_monitor_report.py`).

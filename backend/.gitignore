@@ -70,3 +70,6 @@ ab_results/
 # research/ 데이터·실행 산출물 — 비식별 덤프라도 git 에 올리지 않는다
 research/data/
 research/runs/
+
+# 로컬 가상환경
+.venv/

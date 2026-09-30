@@ -57,6 +57,7 @@ from src.routes import (
     admin_router,
     admin_usage_router,
     announcements_router,
+    monitor_router,
     articles_router,
     beta_router,
     bookmarks_router,
@@ -198,6 +199,13 @@ async def _lifespan(_app: FastAPI):
         report_interval = 900.0
     report_task = (asyncio.create_task(_weekly_report_loop(report_interval))
                    if report_interval > 0 else None)
+    try:
+        monitor_interval = float(
+            (os.getenv("MONITOR_REPORT_CHECK_INTERVAL_S") or "").strip() or "900")
+    except ValueError:
+        monitor_interval = 900.0
+    monitor_task = (asyncio.create_task(_monitor_report_loop(monitor_interval))
+                    if monitor_interval > 0 else None)
     # 스킬 로컬 모델 워밍(2026-09-15) — 첫 사용자 턴이 tool 지원 확인 비용을 내지
     # 않게 부팅 직후 백그라운드로 한 번 확인(성공은 KV 에 남아 재시작에도 유지).
     try:
@@ -211,7 +219,8 @@ async def _lifespan(_app: FastAPI):
     try:
         yield
     finally:
-        tasks = [t for t in (ka_task, warm_task, notice_task, usage_task, report_task)
+        tasks = [t for t in (ka_task, warm_task, notice_task, usage_task, report_task,
+                             monitor_task)
                  if t is not None]
         for t in tasks:
             t.cancel()
@@ -271,6 +280,20 @@ async def _weekly_report_loop(interval: float) -> None:
             await asyncio.to_thread(run_due)
         except Exception:  # noqa: BLE001 — 한 주기 실패가 루프를 끝내면 안 됨
             _log.exception("[weekly_report] 점검 실패 — 다음 주기 재시도")
+        await asyncio.sleep(interval)
+
+
+async def _monitor_report_loop(interval: float) -> None:
+    """고객사 규제 모니터링 리포트 발송 점검. 부팅 직후 3분 뒤 첫 점검.
+    ⚠️ 예외는 삼키되 로그는 남긴다 — 조용히 죽으면 고객사 리포트가 영영 안 간다."""
+    from src.monitor_report import run_due
+
+    await asyncio.sleep(min(180.0, interval))
+    while True:
+        try:
+            await asyncio.to_thread(run_due)
+        except Exception:  # noqa: BLE001 — 한 주기 실패가 루프를 끝내면 안 됨
+            _log.exception("[monitor_report] 점검 실패 — 다음 주기 재시도")
         await asyncio.sleep(interval)
 
 
@@ -395,5 +418,6 @@ app.include_router(privacy_router)  # /me/consent · /me/data · /me/erase
 app.include_router(chat_router)     # POST /chat — 자체 SSE 루프 (ADR-0001 Phase 1)
 app.include_router(files_router)    # POST /files/extract — 채팅 첨부 텍스트 추출
 app.include_router(beta_router)     # POST /beta/check — 가입 화이트리스트 확인 (공개)
+app.include_router(monitor_router)  # /monitor/targets — 고객사 규제 모니터링
 app.include_router(announcements_router)  # /announcements — 패치노트(최초 접속 팝업)
 app.include_router(notices_router)  # /me/notices · /admin/notices — 사용자별 앱 내 알림(2026-09-15)

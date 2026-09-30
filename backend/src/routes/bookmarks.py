@@ -11,6 +11,7 @@ import logging
 
 from fastapi import APIRouter, HTTPException, Request
 
+from src.amendments import detect as detect_amendments
 from src.persistence import Bookmark, get_bookmarks_repo
 
 _log = logging.getLogger(__name__)
@@ -130,61 +131,4 @@ def bookmark_amendments(request: Request):
     """
     user_id = _require_user(request)
     bms = get_bookmarks_repo().list_for_user(user_id, limit=500)
-    key_to: dict[str, dict] = {}
-    for b in bms:
-        d = b.as_dict()
-        c = d.get("citation") or {}
-        cid = str(c.get("id") or "")
-        if not cid.startswith("cite_doc_"):
-            continue
-        ak = cid[len("cite_doc_"):]
-        if not ak or ak in key_to:
-            continue
-        key_to[ak] = {
-            "bookmark_id": d["id"],
-            "citation_id": cid,
-            "title": c.get("title"),
-            "saved_date": c.get("date"),
-        }
-    if not key_to:
-        return {"amendments": []}
-
-    out = []
-    flagged: set[str] = set()
-
-    # 1) law.go.kr 개정상태(enrich) — 폐지/개정예정. law_id 는 article_key 접두(6자리).
-    try:
-        from src.retrieval.pg_client import fetch_amendment_status
-        law_by_ak = {ak: ak.split("_")[0] for ak in key_to}
-        statuses = fetch_amendment_status(list(set(law_by_ak.values())))
-        for ak, info in key_to.items():
-            st = statuses.get(law_by_ak[ak])
-            if st == "repealed":
-                out.append({**info, "kind": "repealed"})
-                flagged.add(ak)
-            elif st == "pending":
-                out.append({**info, "kind": "pending"})
-                flagged.add(ak)
-    except Exception as e:  # noqa: BLE001 — enrich 미가용 시 시행일 비교만
-        _log.warning("bookmark amendment status 조회 실패: %s", e)
-
-    # 2) 시행일 비교 — 위에서 안 걸린 것만 (kind="amended").
-    try:
-        from src.retrieval.pg_client import fetch_articles
-        rows = fetch_articles(
-            [ak for ak in key_to if ak not in flagged], medical_filter=False)
-    except Exception as e:  # noqa: BLE001 — PG 조회 실패는 이 축만 스킵(비차단)
-        _log.warning("bookmark amendments fetch 실패: %s", e)
-        rows = {}
-    for ak, info in key_to.items():
-        if ak in flagged:
-            continue
-        row = rows.get(ak)
-        if not row:
-            continue
-        cur = row.get("enforce_date")
-        cur_s = str(cur) if cur else None
-        saved = info.get("saved_date")
-        if cur_s and saved and cur_s != str(saved):
-            out.append({**info, "kind": "amended", "current_date": cur_s})
-    return {"amendments": out}
+    return {"amendments": detect_amendments(bms)}

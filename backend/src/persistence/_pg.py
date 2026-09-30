@@ -275,6 +275,23 @@ CREATE TABLE IF NOT EXISTS app_settings (
 );
 
 -- 관리자 답변 검수(2026-09-17) — 최종 AI 답변 1건 × 검수자 1행(upsert).
+CREATE TABLE IF NOT EXISTS monitor_targets (
+  id            TEXT PRIMARY KEY,
+  user_id       TEXT NOT NULL,
+  folder        TEXT NOT NULL,
+  label         TEXT,
+  recipients    TEXT NOT NULL,
+  cadence       TEXT NOT NULL DEFAULT 'weekly',
+  send_weekday  INTEGER NOT NULL DEFAULT 0,
+  send_hour     INTEGER NOT NULL DEFAULT 9,
+  enabled       INTEGER NOT NULL DEFAULT 1,
+  last_sent_at  TIMESTAMPTZ,
+  created_at    TIMESTAMPTZ NOT NULL,
+  UNIQUE(user_id, folder)
+);
+CREATE INDEX IF NOT EXISTS idx_monitor_targets_user
+  ON monitor_targets(user_id, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS answer_reviews (
   id          TEXT PRIMARY KEY,
   thread_id   TEXT NOT NULL,

@@ -20,6 +20,7 @@ from src.routes.feedback import router as feedback_router
 from src.routes.files import router as files_router
 from src.routes.health import router as health_router
 from src.routes.law_graph import router as law_graph_router
+from src.routes.monitor import router as monitor_router
 from src.routes.notices import router as notices_router
 from src.routes.privacy import router as privacy_router
 from src.routes.reports import router as reports_router
@@ -39,6 +40,7 @@ __all__ = [
     "bookmarks_router",
     "health_router",
     "law_graph_router",
+    "monitor_router",
     "notices_router",
     "reports_router",
 ]

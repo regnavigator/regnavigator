@@ -1266,3 +1266,43 @@ python scripts/check_connection.py --origin http://localhost:3000
   계정 판정 정본은 `src/account_class.py` — 관리자 라벨(`PATCH /admin/users/{id} {account_class}`)이
   자동 규칙(관리자 → 운영진, 오픈 전 가입 + 베타 초대 명단에 없음 → 테스트)을 덮는다. 2026-09-21 전에는 관리자만 뺐고
   (오픈 전 가입·팀원 개인 계정이 실사용으로 샘), 검수 큐만 따로 오픈 전 가입을 뺐다.
+
+---
+
+## 고객사 규제 모니터링 — `/monitor/*` (2026-10-01 신규)
+
+로펌이 고객사별로 관심 조문을 모아 두고(= `bookmarks.folder`), 그 폴더의 **폐지·개정예정·
+시행일 변경**을 주기적으로 감지해 지정 수신자에게 리포트를 보낸다. 전부 user 스코프.
+
+판정은 `GET /bookmarks/amendments` 와 **같은 로직**(`src/amendments.py:detect`)을 쓴다 —
+개인 조회와 고객사 리포트가 어긋나면 안 된다.
+
+| 메서드 | 경로 | 설명 |
+|---|---|---|
+| `GET` | `/monitor/targets` | 내 설정 목록 + `watched`(폴더별 관찰 건수) + `next_run_at`, 그리고 선택 가능한 `folders` |
+| `POST` | `/monitor/targets` | 생성. 같은 `folder` 재등록은 **갱신(멱등)**. 201 |
+| `PATCH` | `/monitor/targets/{id}` | 부분 수정 |
+| `DELETE` | `/monitor/targets/{id}` | 삭제. 204 |
+| `GET` | `/monitor/targets/{id}/preview` | **발송하지 않고** 지금 시점 리포트 미리보기(영업 시연·검수) |
+| `POST` | `/monitor/targets/{id}/send` | 수동 발송. body `{ to?: [email], force?: bool }` |
+
+**body(생성·수정)**
+
+| 필드 | 필수 | 설명 |
+|---|---|---|
+| `folder` | ✅ | 고객사 = 북마크 폴더명 |
+| `recipients` | ✅ | 쉼표/줄바꿈 구분 문자열 또는 배열. 유효 이메일 1개 이상 |
+| `label` | | 고객사 표시명(없으면 `folder`) |
+| `cadence` | | `weekly`(기본) \| `monthly` |
+| `send_weekday` | | 0=월 … 6=일 (weekly 전용, 기본 0) |
+| `send_hour` | | 0~23 KST (기본 9) |
+| `enabled` | | 기본 true |
+
+**동작 규칙**
+
+- **변경 0건이면 보내지 않는다**(기본). `MONITOR_REPORT_SEND_ON_NO_CHANGE=1` 로 변경.
+  "변화 없음" 메일이 쌓이면 리포트를 안 읽게 된다.
+- `last_sent_at` 은 **한 곳이라도 발송에 성공했을 때만** 갱신 — 전부 실패면 다음 점검에 재시도.
+- 수동 발송(`/send`)은 `last_sent_at` 을 건드리지 않는다 — 정기 발송은 예정대로 나간다.
+- 주기 루프는 `MONITOR_REPORT_CHECK_INTERVAL_S`(기본 900초, 0=끔). 부팅 3분 뒤 첫 점검.
+- 판정과 기록은 **같은 시각**으로 묶인다(`run_due`) — 주기 경계에서 중복 발송 방지.

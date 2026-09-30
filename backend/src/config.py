@@ -370,6 +370,10 @@ ENV_REGISTRY: tuple[Setting, ...] = (
     Setting("WEEKLY_REPORT_SEND_WEEKDAY", "0", "ops",
             "주간 보고서 발송 요일 0=월~6=일 — 기본값, 관리자 화면 저장값이 우선"),
     Setting("WEEKLY_REPORT_CHECK_INTERVAL_S", "900", "ops", "주간 보고서 발송 점검 주기(초). 0=루프 끔"),
+    Setting("MONITOR_REPORT_CHECK_INTERVAL_S", "900", "ops",
+            "고객사 규제 모니터링 리포트 발송 점검 주기(초). 0=루프 끔"),
+    Setting("MONITOR_REPORT_SEND_ON_NO_CHANGE", "0", "ops",
+            "변경 0건이어도 리포트를 보낼지(1=보냄). 기본 0=생략"),
     Setting("USAGE_WEEKLY_SNAPSHOT_INTERVAL_S", "21600", "ops",
             "주간 이용 집계 스냅샷 보장 주기(초, 기본 6h). 0=끔 — 관리자 화면 조회 시에도 없는 주는 저장된다"),
 )
