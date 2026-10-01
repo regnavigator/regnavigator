@@ -17,6 +17,8 @@ import { articleKeyFromCitation } from "@/lib/client/article";
 import { LawGraphPanel } from "@/components/chat/LawGraphPanel";
 import { MarkdownContent } from "@/components/chat/MarkdownContent";
 import { CitationFootnotes } from "@/components/chat/CitationFootnotes";
+import { PathwayCard } from "@/components/chat/PathwayCard";
+import { useRightPanel } from "@/lib/store/rightPanel";
 import { CiteHighlightProvider } from "@/components/chat/CiteHighlightContext";
 import { ArtifactCard } from "@/components/chat/ArtifactCard";
 import { ConfidenceBadge } from "@/components/chat/ConfidenceBadge";
@@ -25,6 +27,7 @@ import {
   extractProcedureSteps,
 } from "@/components/chat/ProcedureTimeline";
 import { FeedbackButtons } from "@/components/chat/FeedbackButtons";
+import type { PathwayStep } from "@/lib/store/types/state";
 import type { Turn } from "@/lib/store/types";
 
 /** 답변 + 참고자료(인용) 를 함께 복사 — RA/QA 가 문서에 근거까지 붙여넣도록. */
@@ -87,6 +90,8 @@ type Props = {
   answer: NonNullable<Turn["answer"]>;
   /** 스트리밍 중 (turn.status === "running") — 본문 끝에 깜빡이는 caret 노출 */
   streaming?: boolean;
+  /** 규제 경로 분해 단계 — 절차성 질의에만 온다(2026-10-01) */
+  pathway?: PathwayStep[] | null;
 };
 
 /** 근거 법령 네트워크(그래프) 노출 여부 — 2026-08-03 **끔**.
@@ -97,7 +102,8 @@ type Props = {
  */
 const LAW_GRAPH_ENABLED = process.env.NEXT_PUBLIC_LAW_GRAPH === "1";
 
-export function TurnAnswer({ answer, streaming = false }: Props) {
+export function TurnAnswer({ answer, streaming = false, pathway = null }: Props) {
+  const { setCitation } = useRightPanel();
   const [threadId] = useQueryState("threadId");
   // 근거 법령 네트워크 — doc 인용의 조 단위 article_key를 seed로 관계 그래프(PIP).
   const [graphOpen, setGraphOpen] = useState(false);
@@ -131,6 +137,18 @@ export function TurnAnswer({ answer, streaming = false }: Props) {
       </div>
       {procedureSteps.length >= 3 ? (
         <ProcedureTimeline steps={procedureSteps} />
+      ) : null}
+      {/* 규제 경로 체크리스트 — 본문 아래, 인용 각주 위. 절차를 먼저 보고
+          근거를 확인하는 순서가 자연스럽다. */}
+      {!streaming && pathway?.length ? (
+        <PathwayCard
+          steps={pathway}
+          storageKey={answer.id}
+          onCite={(n) => {
+            const c = (answer.citations ?? []).find((x) => x.number === n);
+            if (c) setCitation(c.id);
+          }}
+        />
       ) : null}
       {!streaming ? <CitationFootnotes citations={answer.citations} /> : null}
       {/* ✨ 근거 지도 — References 아래 명시 진입점 (hover toolbar와 이중) */}

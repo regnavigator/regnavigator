@@ -9,6 +9,7 @@
  * `parseNextStepsMarker`가 본문에서 마커 strip + items 추출.
  */
 
+import { useMemo } from "react";
 import { UserMessage } from "@/components/chat/UserMessage";
 import { StepCarousel } from "@/components/chat/StepCarousel";
 import { LiveSearchGlass } from "@/components/chat/LiveSearchGlass";
@@ -17,6 +18,7 @@ import { NextStepsCard } from "@/components/chat/NextStepsCard";
 import { RelatedFormsCard } from "@/components/chat/RelatedFormsCard";
 import { InterruptCard } from "@/components/chat/InterruptCard";
 import { parseNextStepsMarker } from "@/lib/parse/nextSteps";
+import { parsePathwayMarker, stripPathwayMarker } from "@/lib/parse/pathwayMarker";
 import { stripVerdictMarker } from "@/lib/parse/verdict";
 import type { Turn as TurnType } from "@/lib/store/types";
 
@@ -72,6 +74,11 @@ export function Turn({
   // 실제로 도는 동안(streamingActive)은 streaming으로 취급 → 인용문서·References·
   // ConfidenceBadge·Artifact는 스트림이 끝난 *뒤에만* 한 번에 노출.
   const streaming = turn.status === "running" || streamingActive;
+  // 경로는 본문 마커에서 꺼낸다 — 스레드를 다시 열어도 그대로 살아난다.
+  const pathway = useMemo(
+    () => (turn.answer?.content ? parsePathwayMarker(turn.answer.content) : []),
+    [turn.answer?.content],
+  );
   // running 상태인데 step도 답변도 아직 없음 → 즉시 피드백 (백엔드 첫 chunk 대기 중).
   // chunk 무수신 60s 도달 시 useChatState가 자동 abort + InlineErrorBanner 노출 →
   // 사용자가 정지 버튼 누를 필요 없음. 경과 초 표시는 제거 — 대기 불안만 키움.
@@ -81,7 +88,7 @@ export function Turn({
   // 답변 본문 끝의 `<next_steps>` 마커 파싱.
   // streaming 중 partial 마커는 본문에서 stripping만 하고 items는 빈 배열.
   const parsed = turn.answer
-    ? parseNextStepsMarker(turn.answer.content)
+    ? parseNextStepsMarker(stripPathwayMarker(turn.answer.content))
     : { clean: "", items: [] };
   // IRB/DRB 스킬 판정 턴의 `<verdict>` 블록 숨김 — 판정 데이터는 skill_verdict
   // 이벤트로 별도 수신, 본문에는 노출하지 않음 (backend v2 §2-4).
@@ -119,7 +126,7 @@ export function Turn({
         className="flex flex-col gap-3"
       >
         {hasAnswerContent ? (
-          <TurnAnswer answer={cleanedAnswer!} streaming={false} />
+          <TurnAnswer answer={cleanedAnswer!} streaming={false} pathway={pathway} />
         ) : null}
         <ReportDoneCard />
       </article>
@@ -294,7 +301,7 @@ export function Turn({
           kind:"report_overview" 전용 턴(위 early return). */}
       {showFinalAnswer ? (
         <>
-          <TurnAnswer answer={cleanedAnswer!} streaming={streaming} />
+          <TurnAnswer answer={cleanedAnswer!} streaming={streaming} pathway={pathway} />
           {!streaming && onUseAsForm ? (
             <RelatedFormsCard
               question={turn.user_message.content}

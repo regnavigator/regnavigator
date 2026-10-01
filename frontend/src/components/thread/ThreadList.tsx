@@ -542,7 +542,7 @@ export function ThreadList({ configured, refreshKey, onError, onCollapse, onOpen
             {mode ? MODE_META[mode].icon : "tune"}
           </span>
           <span className="min-w-0 flex-1 truncate">
-            {mode ? MODE_META[mode].short : "모드"} 모드
+            {mode ? `${MODE_META[mode].short} 모드` : "모드 선택"}
           </span>
           <span className="material-symbols-outlined text-[14px] opacity-60" aria-hidden>
             swap_horiz

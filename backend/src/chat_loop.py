@@ -1927,6 +1927,36 @@ async def _run_turn(
         except Exception:
             _log.debug("skill_verdict emit failed", exc_info=True)
 
+    # ── 규제 경로 분해(2026-10-01) — <pathway> 마커 → 전용 채널 ────────────
+    # 단계 체크리스트를 본문 산문에 묻으면 추적이 안 된다(<next_steps> 와 같은
+    # 이유). 마커를 걷어내고 SSE `pathway` 로 보낸다. 파싱 실패는 조용히 버린다.
+    _pathway: Optional[list[dict]] = None
+    if body:
+        try:
+            from src import pathway as _pw
+
+            _pathway = _pw.parse(body)
+            if _pathway is not None:
+                # 마커는 **본문에 남긴다** — <next_steps> 와 같은 계약이다.
+                # 전용 SSE 이벤트로만 보내면 새로고침·스레드 재방문 때 경로가
+                # 사라진다(메시지는 영속되지만 이벤트는 휘발). FE 가 파싱해 카드로
+                # 렌더하고 본문에서는 가린다.
+                _log.info("pathway: %d단계 추출 thread=%s", len(_pathway), thread_id)
+                try:
+                    import json as _json
+
+                    from src.persistence import get_events_repo
+                    from src.persistence.events_repo import Event as _Ev
+                    await asyncio.to_thread(get_events_repo().emit, _Ev(
+                        id="", ts="", event_type="pathway",
+                        user_id=user_id, thread_id=thread_id,
+                        payload_json=_json.dumps(_pw.summary(_pathway),
+                                                 ensure_ascii=False)))
+                except Exception:  # noqa: BLE001 — 적재 실패가 답변을 막지 않는다
+                    _log.warning("pathway 이벤트 적재 실패", exc_info=True)
+        except Exception:  # noqa: BLE001 — 경로 추출 실패로 답변을 잃지 않는다
+            _log.warning("pathway 처리 실패 — 무시", exc_info=True)
+
     # ── 본문 URL 강제(2026-08-19) — 링크 소유권을 모델에서 코드로 ──────────
     # 종전 backstop 은 "출처에 문자열이 있으면 통과"라 실제 오류(경로 403·http
     # 스킴)를 놓치고 정상(백틱 붙은 emedi)은 오탐했다. 이제 레지스트리 값만

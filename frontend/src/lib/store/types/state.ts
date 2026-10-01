@@ -5,6 +5,18 @@
 import type { FileEntry, Message, Step, Turn } from "./chat";
 import type { Report } from "./report";
 
+export type PathwayStep = {
+  no: number;
+  title: string;
+  what: string | null;
+  where: string | null;
+  form: string | null;
+  when: string | null;
+  note: string | null;
+  /** 본문 [n] 인용 번호 — 클릭하면 해당 인용으로 이동 */
+  cites: number[];
+};
+
 export type ChatState = {
   messages: Message[];
   files: Record<string, FileEntry>;
