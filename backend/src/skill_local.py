@@ -36,6 +36,22 @@ UNAVAILABLE_NOTICE = (
 )
 
 
+CONFIDENTIAL_UNAVAILABLE_NOTICE = (
+    "기밀 모드는 원내(온프레미스) 모델로만 처리하도록 되어 있는데, 지금 그 엔진이 "
+    "점검 중입니다. 의뢰인 정보가 외부로 나가지 않도록 **상용 모델로 우회하지 "
+    "않습니다.** 엔진이 복구된 뒤 다시 시도해 주세요. 기밀 모드를 끄면 지금도 "
+    "일반 규제 질의는 이용할 수 있습니다."
+)
+
+
+CONFIDENTIAL_NOT_CONFIGURED_NOTICE = (
+    "기밀 모드가 요청됐지만 이 서버에는 **원내(온프레미스) 모델이 설정되어 있지 "
+    "않습니다.** 의뢰인 정보가 외부로 나가지 않도록 상용 모델로 대신 처리하지 "
+    "않고 중단했습니다. 관리자에게 온프레미스 모델 설정(SKILL_LOCAL_MODEL)을 "
+    "요청하시거나, 기밀 모드를 끄고 일반 규제 질의로 이용해 주세요."
+)
+
+
 def base_url() -> str:
     return ((os.getenv("SKILL_LOCAL_BASE_URL") or "").strip()
             or (os.getenv("REPORT_WRITER_BASE_URL") or "").strip())

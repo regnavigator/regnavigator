@@ -83,3 +83,37 @@ export function styleForMode(mode: AppMode | null): "expert" | "simple" | null {
 export function isProFeatureVisible(mode: AppMode | null): boolean {
   return mode !== "public";
 }
+
+
+// ── 기밀 모드 ───────────────────────────────────────────────────────────────
+//
+// 전문가 경로에서 사건 파일·의뢰인 사실관계를 다룰 때 켠다. 켜지면 그 대화는
+// 온프레미스 모델로만 처리되고 웹 검색 도구가 부여되지 않는다(백엔드 보장).
+// 전문가 모드에서만 의미가 있다.
+
+const CONF_KEY = "regnav_confidential";
+
+export const CONFIDENTIAL_CHANGED_EVENT = "regnav-confidential-changed";
+
+export function getConfidential(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(CONF_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function setConfidential(on: boolean): void {
+  try {
+    if (on) window.localStorage.setItem(CONF_KEY, "1");
+    else window.localStorage.removeItem(CONF_KEY);
+  } catch {
+    /* 무시 */
+  }
+  try {
+    window.dispatchEvent(new CustomEvent(CONFIDENTIAL_CHANGED_EVENT, { detail: on }));
+  } catch {
+    /* 무시 */
+  }
+}

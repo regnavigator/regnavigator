@@ -94,6 +94,7 @@ class ChatRequest(BaseModel):
     model: str | None = None
     # 답변 설명 수준 — "expert"(RA/QA, 조문 중심) | "simple"(비전문가, 쉬운 설명)
     style: str | None = None
+    confidential: bool = False
     # 첨부 문서(파일 업로드 v1, 2026-08-05) — 계약: docs/contracts/frontend_chat_v2.md
     attachments: list[ChatAttachment] | None = None
     # 스킬 명시 진입(2026-08-21) — "irb_drb": IRB/DRB 버튼. 키워드 프리게이트가
@@ -215,6 +216,7 @@ async def chat(req: ChatRequest, request: Request):
     async def _gen():
         try:
             style = req.style if req.style in ("expert", "simple") else None
+            confidential = bool(req.confidential)
             agen = run_chat_turn(
                 thread_id,
                 _compose_message(req.message, req.attachments),
@@ -222,6 +224,7 @@ async def chat(req: ChatRequest, request: Request):
                 selected_law_keys=req.selected_law_keys,
                 model_name=model_name,
                 style=style,
+                confidential=confidential,
                 skill_hint=req.skill_hint if req.skill_hint == "irb_drb" else None,
             ).__aiter__()
             while True:

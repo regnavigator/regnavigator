@@ -11,6 +11,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useMode } from "@/components/providers/ModeProvider";
+import { getConfidential, setConfidential as persistConfidential } from "@/lib/store/mode";
 import { getMyPrefs, setReportEmailOptIn } from "@/lib/client/prefs";
 import { extractFile, type ExtractedAttachment } from "@/lib/client/files";
 import { toast } from "sonner";
@@ -80,6 +81,9 @@ export function ChatInput({
 }: Props) {
   // 보고서 기능 가용성(2026-09-07) — 일시 중단이면 버튼 비활성 + 배너, writer 다운이면 경고
   const { showPro } = useMode();   // 일반 상담 모드에서는 전문가 기능을 감춘다
+  const [confidential, setConfidentialState] = useState(false);
+  // localStorage 는 SSR 에서 못 읽으므로 mount 뒤 채운다(hydration 불일치 방지).
+  useEffect(() => { setConfidentialState(getConfidential()); }, []);
   const reportsAvail = useReportsAvailability();
   const [value, setValue] = useState("");
   // IRB/DRB 모드 — AI 키워드 감지와 별개의 명시 진입 버튼(이중 접근, 2026-08-21).
@@ -484,8 +488,38 @@ export function ChatInput({
                 attach_file
               </span>
             </button>
-            {/* IRB/DRB 모드 — AI 키워드 감지와 별개의 명시 진입(이중 접근).
-                켜면 화순전남대병원 심의 지침 기반으로 안내됨을 배지로 표시. */}
+            {/* 기밀 모드 — 전문가 경로 전용(2026-10-01). 켜면 이 대화는 온프레미스
+                모델로만 처리되고 웹 검색 도구가 부여되지 않는다. 사건 파일·의뢰인
+                사실관계를 다룰 때 쓴다. */}
+            {showPro ? (
+              <button
+                type="button"
+                data-testid="confidential-toggle"
+                onClick={() => {
+                  const next = !confidential;
+                  setConfidentialState(next);
+                  persistConfidential(next);
+                }}
+                aria-pressed={confidential}
+                aria-label={confidential ? "기밀 모드 해제" : "기밀 모드 — 원내 모델로만 처리"}
+                title={
+                  confidential
+                    ? "기밀 모드 켜짐 — 이 대화는 원내 모델로만 처리되고 웹 검색을 쓰지 않습니다"
+                    : "기밀 모드 — 사건 파일·의뢰인 정보를 다룰 때 켜십시오. 원내 모델로만 처리됩니다"
+                }
+                className={
+                  "inline-flex h-9 items-center gap-1.5 rounded-full px-3.5 text-[13px] font-medium transition-colors " +
+                  (confidential
+                    ? "bg-md-primary-fixed text-md-on-primary-fixed-variant shadow-sm"
+                    : "text-md-on-surface-variant hover:bg-md-surface-container-low hover:text-md-on-surface")
+                }
+              >
+                <span className="material-symbols-outlined text-[16px]" aria-hidden>
+                  {confidential ? "lock" : "lock_open"}
+                </span>
+                기밀
+              </button>
+            ) : null}
 
             <button
               type="button"

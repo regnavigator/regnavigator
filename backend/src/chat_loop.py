@@ -1249,6 +1249,7 @@ async def run_chat_turn(
     model_name: Optional[str] = None,
     models: Optional[tuple[Any, Any]] = None,  # 테스트 주입용 (normal, forced)
     style: Optional[str] = None,  # "expert" | "simple" — 답변 설명 수준
+    confidential: bool = False,  # 기밀 모드 — 온프레미스 전용 처리
     skill_hint: Optional[str] = None,  # "irb_drb" — 프런트 버튼 명시 진입
 ) -> AsyncIterator[dict]:
     """한 턴 실행 — 이벤트 dict 스트림.
@@ -1274,7 +1275,7 @@ async def run_chat_turn(
                     thread_id, user_text, user_id=user_id,
                     selected_law_keys=selected_law_keys,
                     model_name=model_name, models=models, emit=_emit,
-                    style=style, skill_hint=skill_hint,
+                    style=style, confidential=confidential, skill_hint=skill_hint,
                 )
         except Exception as e:  # noqa: BLE001 — 스트림에 사용자향 에러 후 종료
             _log.exception("chat_loop turn failed: %s", e)
@@ -1325,6 +1326,7 @@ async def _run_turn(
     models: Optional[tuple[Any, Any]],
     emit,
     style: Optional[str] = None,
+    confidential: bool = False,  # 기밀 모드 — 온프레미스 전용 처리
     skill_hint: Optional[str] = None,
 ) -> None:
     # 동기 I/O(SQLite·PII NER HTTP)는 전부 to_thread — 이벤트 루프 점유 방지.
@@ -1446,14 +1448,34 @@ async def _run_turn(
     # 상용 노출 자체를 없앤다(SKILL_LOCAL_MODEL=1). 로컬 다운이면 상용 폴백
     # 없이 안내 후 종료(유출 정책이 시간대에 따라 구멍 나지 않게 — 새벽 4시
     # vLLM 재구동 포함). 테스트 모델 주입(models=) 경로는 종전과 동일.
+    # 기밀 모드(2026-10-01) — 변호사가 사건 파일·의뢰인 사실관계를 다룰 때 켠다.
+    # 스킬 턴과 **같은 경로**로 처리한다: 온프레미스 모델 + 웹 도구 제거 + 상용
+    # 폴백 없음. 둘 중 하나라도 켜지면 로컬로 보낸다.
     local_skill_model: Optional[str] = None
-    if turn_skill and models is None:
+    if (turn_skill or confidential) and models is None:
         from src import skill_local as _skill_local
+
+        # ⚠️ fail-closed — 기밀 모드를 켰는데 온프레미스 라우팅이 **설정되어 있지
+        # 않으면** 상용 모델로 조용히 넘어가서는 안 된다. 사용자는 보호받는다고
+        # 믿고 사건 파일을 넣는다. 설정이 없으면 답하지 않고 알린다(2026-10-01).
+        if confidential and not _skill_local.enabled():
+            notice = _skill_local.CONFIDENTIAL_NOT_CONFIGURED_NOTICE
+            ai_notice = AIMessage(content=notice, id=f"msg_{uuid4().hex[:12]}")
+            state.messages.append(ai_notice)
+            await asyncio.to_thread(repo.append_messages, thread_id, [ai_notice])
+            emit({"type": "token", "text": notice, "message_id": ai_notice.id})
+            emit({"type": "done", "thread_id": thread_id,
+                  "message_id": ai_notice.id, "text": notice, "steps": []})
+            _log.warning("기밀 모드 요청됐으나 온프레미스 라우팅 미설정 — "
+                         "상용 폴백 금지, 안내 후 종료")
+            return
 
         if _skill_local.enabled():
             local_skill_model = await asyncio.to_thread(_skill_local.probe)
             if not local_skill_model:
-                notice = _skill_local.UNAVAILABLE_NOTICE
+                notice = (_skill_local.CONFIDENTIAL_UNAVAILABLE_NOTICE
+                          if confidential and not turn_skill
+                          else _skill_local.UNAVAILABLE_NOTICE)
                 ai_notice = AIMessage(content=notice,
                                       id=f"msg_{uuid4().hex[:12]}")
                 state.messages.append(ai_notice)

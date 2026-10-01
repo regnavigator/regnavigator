@@ -100,6 +100,8 @@ export async function streamChatEvents(
     attachments?: { name: string; text: string }[] | null;
     /** 스킬 명시 진입 — "irb_drb": IRB/DRB 버튼(키워드 감지 실패 대비 이중 접근) */
     skill_hint?: string | null;
+    /** 기밀 모드 — 온프레미스 모델 전용 처리(웹 도구 미부여, 상용 폴백 없음) */
+    confidential?: boolean;
   },
   opts: { signal?: AbortSignal },
   onEvent: (ev: ChatSseEvent) => void,

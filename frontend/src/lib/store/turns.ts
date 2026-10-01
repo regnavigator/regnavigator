@@ -24,7 +24,7 @@
  */
 
 import { toast } from "sonner";
-import { getMode, styleForMode } from "@/lib/store/mode";
+import { getConfidential, getMode, styleForMode } from "@/lib/store/mode";
 import { streamChatEvents, type ChatSseEvent } from "@/lib/client/chatApi";
 import { isDummyMode } from "@/lib/store/settings";
 
@@ -922,6 +922,7 @@ export async function runStream(
           style: getAnswerStyle(),
           attachments: options.attachments ?? null,
           skill_hint: options.skillHint ?? null,
+          confidential: getConfidential(),
         },
         { signal: innerAc.signal },
         onEvent,

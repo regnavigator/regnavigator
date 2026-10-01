@@ -62,7 +62,7 @@ export function PageShell() {
 }
 
 function PageShellInner() {
-  const { showPro } = useMode();   // 일반 상담 모드에서는 서식 작성 진입을 막는다
+  const { showPro } = useMode();   // 서식 작성은 전문가 경로 전용
   const isNarrow = useIsNarrow();
   const [threadsOpen, setThreadsOpen] = useState(true);
   const narrowInitRef = useRef(false);
@@ -485,7 +485,7 @@ type ChatProps = ReturnType<typeof useChatState>;
 
 type ChatColumnProps = {
   /** 서식 즉시 작성(2026-08-27) — next_steps 서류 초안 핸드오프용 */
-  /** 일반 상담 모드에서는 undefined — 서식 작성 진입을 감춘다. */
+  /** 일반 상담 모드에서는 undefined — 서식 작성은 전문가 경로 전용(사용자 결정). */
   onUseAsForm?: (articleKey: string, title: string) => void;
   chat: ChatProps;
   configured: boolean;
