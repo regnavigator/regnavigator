@@ -24,6 +24,7 @@
  */
 
 import { toast } from "sonner";
+import { getMode, styleForMode } from "@/lib/store/mode";
 import { streamChatEvents, type ChatSseEvent } from "@/lib/client/chatApi";
 import { isDummyMode } from "@/lib/store/settings";
 
@@ -703,9 +704,16 @@ export class StreamInactivityTimeoutError extends Error {
  * **inactivity timeout**: 이벤트가 timeoutMs 동안 안 오면 자체 abort +
  * StreamInactivityTimeoutError throw. 사용자 stop(AbortError)과 구분.
  */
-/** 답변 설명 수준 프리셋 — ChatInput 토글이 저장(localStorage). null=기본. */
+/** 답변 설명 수준 프리셋 — ChatInput 토글이 저장(localStorage). null=기본.
+ *
+ * **모드가 우선한다**(2026-10-01). 일반 상담 모드에서는 토글을 감추므로,
+ * 전문가 모드에서 켜 둔 값이 남아 있어도 `simple` 로 고정한다. 토글을 숨겨
+ * 놓고 이전 설정이 계속 먹으면 모드를 바꾼 의미가 없다.
+ */
 export function getAnswerStyle(): "expert" | "simple" | null {
   if (typeof window === "undefined") return null;
+  const forced = styleForMode(getMode());
+  if (forced) return forced;
   const v = window.localStorage.getItem("medi_answer_style");
   return v === "expert" || v === "simple" ? v : null;
 }

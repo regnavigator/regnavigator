@@ -48,6 +48,7 @@ import { articleKeyFromCitation } from "@/lib/client/article";
 import type { ChatAttachmentPayload } from "@/lib/store/turns";
 import { useUsage } from "@/lib/store/useUsage";
 import { useIsNarrow } from "@/lib/useIsNarrow";
+import { useMode } from "@/components/providers/ModeProvider";
 import type { ChatState } from "@/lib/store/types";
 
 export function PageShell() {
@@ -61,6 +62,7 @@ export function PageShell() {
 }
 
 function PageShellInner() {
+  const { showPro } = useMode();   // 일반 상담 모드에서는 서식 작성 진입을 막는다
   const isNarrow = useIsNarrow();
   const [threadsOpen, setThreadsOpen] = useState(true);
   const narrowInitRef = useRef(false);
@@ -286,7 +288,7 @@ function PageShellInner() {
           <ChatColumn
             chat={chat}
             configured={configured}
-            onUseAsForm={handleUseAsForm}
+            onUseAsForm={showPro ? handleUseAsForm : undefined}
             shellError={shellError}
             clearShellError={() => setShellError(null)}
             setShellError={setShellError}
@@ -341,7 +343,7 @@ function PageShellInner() {
             </header>
             <div className="min-h-0 flex-1">
               <RightPanel state={chat.state} isRunning={chat.isRunning} reportRunning={chat.reportRunning} reportQueueAhead={chat.state.report_queue_ahead ?? null} reportProgress={chat.state.report_progress ?? null}
-                onUseAsForm={handleUseAsForm} />
+                onUseAsForm={showPro ? handleUseAsForm : undefined} />
             </div>
           </div>
         ) : null}
@@ -415,7 +417,7 @@ function PageShellInner() {
             <ChatColumn
               chat={chat}
               configured={configured}
-              onUseAsForm={handleUseAsForm}
+              onUseAsForm={showPro ? handleUseAsForm : undefined}
               shellError={shellError}
               clearShellError={() => setShellError(null)}
               setShellError={setShellError}
@@ -454,7 +456,7 @@ function PageShellInner() {
                 }
               >
                 <RightPanel state={chat.state} isRunning={chat.isRunning} reportRunning={chat.reportRunning} reportQueueAhead={chat.state.report_queue_ahead ?? null} reportProgress={chat.state.report_progress ?? null}
-                onUseAsForm={handleUseAsForm} />
+                onUseAsForm={showPro ? handleUseAsForm : undefined} />
               </Panel>
             </>
           )}
@@ -483,7 +485,8 @@ type ChatProps = ReturnType<typeof useChatState>;
 
 type ChatColumnProps = {
   /** 서식 즉시 작성(2026-08-27) — next_steps 서류 초안 핸드오프용 */
-  onUseAsForm: (articleKey: string, title: string) => void;
+  /** 일반 상담 모드에서는 undefined — 서식 작성 진입을 감춘다. */
+  onUseAsForm?: (articleKey: string, title: string) => void;
   chat: ChatProps;
   configured: boolean;
   shellError: string | null;
@@ -539,6 +542,7 @@ function ChatColumn({
   onOpenThreads,
   rightPanelToggle,
 }: ChatColumnProps) {
+  const { mode } = useMode();
   const router = useRouter();
   const pathname = usePathname();
   const [threadId, setThreadIdQuery] = useQueryState("threadId");
@@ -796,6 +800,20 @@ function ChatColumn({
         </header>
       )}
 
+      {/* 일반 상담 모드 고지 — 정보형 서비스임을 상시 밝힌다(2026-10-01). */}
+      {mode === "public" ? (
+        <div
+          data-testid="public-notice"
+          className="shrink-0 border-b border-md-outline-variant bg-md-surface-container-low px-4 py-1.5 text-[11.5px] leading-snug text-md-on-surface-variant"
+        >
+          <span className="material-symbols-outlined mr-1 align-[-3px] text-[14px]" aria-hidden>
+            info
+          </span>
+          법령·절차를 안내하는 서비스이며 <b>법률 자문이 아닙니다.</b> 구체적인 사안은 담당
+          전문가에게 확인하십시오.
+        </div>
+      ) : null}
+
       {errorBanner ? (
         <InlineErrorBanner
           message={errorBanner}
@@ -879,7 +897,7 @@ function ChatColumn({
                       if (purpose === "document_draft") {
                         const forms = findRecentFormCitations(state);
                         const only = forms[0];
-                        if (forms.length === 1 && only) {
+                        if (forms.length === 1 && only && onUseAsForm) {
                           onUseAsForm(only.key, only.title);
                           return;
                         }
@@ -947,7 +965,7 @@ function ChatColumn({
                     type="button"
                     onClick={() => {
                       setFormChoices(null);
-                      onUseAsForm(f.key, f.title);
+                      onUseAsForm?.(f.key, f.title);
                     }}
                     className="flex items-start gap-2.5 rounded-card border border-md-outline-variant bg-md-surface-container-lowest px-3.5 py-3 text-left transition-colors hover:border-md-primary hover:bg-md-primary-container/30"
                   >

@@ -11,6 +11,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { getAnswerStyle, setAnswerStyle } from "@/lib/store/turns";
+import { useMode } from "@/components/providers/ModeProvider";
 import { getMyPrefs, setReportEmailOptIn } from "@/lib/client/prefs";
 import { extractFile, type ExtractedAttachment } from "@/lib/client/files";
 import { toast } from "sonner";
@@ -79,6 +80,7 @@ export function ChatInput({
   onStop,
 }: Props) {
   // 보고서 기능 가용성(2026-09-07) — 일시 중단이면 버튼 비활성 + 배너, writer 다운이면 경고
+  const { showPro } = useMode();   // 일반 상담 모드에서는 전문가 기능을 감춘다
   const reportsAvail = useReportsAvailability();
   const [value, setValue] = useState("");
   // IRB/DRB 모드 — AI 키워드 감지와 별개의 명시 진입 버튼(이중 접근, 2026-08-21).
@@ -533,8 +535,9 @@ export function ChatInput({
               </span>
               피드백
             </button>
-            {/* 심층 보고서 수동 트리거 — AI 제안(next_steps)에만 의존하던 발견성 개선 */}
-            {onManualReport ? (
+            {/* 심층 보고서 수동 트리거 — AI 제안(next_steps)에만 의존하던 발견성 개선.
+                일반 상담 모드에서는 감춘다(2026-10-01 모드 분기). */}
+            {onManualReport && showPro ? (
               <Popover>
                 <PopoverTrigger asChild>
                   <button
@@ -601,9 +604,11 @@ export function ChatInput({
                   {value.length.toLocaleString()} / {MAX_INPUT_CHARS.toLocaleString()}자
                 </span>
               ) : null}
-              <div data-tour="style">
-                <AnswerStyleToggle />
-              </div>
+              {showPro ? (
+                <div data-tour="style">
+                  <AnswerStyleToggle />
+                </div>
+              ) : null}
             </div>
           </div>
         </div>

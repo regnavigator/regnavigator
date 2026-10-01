@@ -82,6 +82,13 @@ export default async function middleware(req: NextRequest, event: NextFetchEvent
     const tid = searchParams.get("threadId");
     if (tid) {
       url.pathname = "/new";  // 쿼리는 그대로 유지됨
+    } else if (req.cookies.get("next-auth.session-token") ||
+               req.cookies.get("__Secure-next-auth.session-token") ||
+               process.env.NEXT_PUBLIC_AUTH_BYPASS === "true" ||
+               process.env.NEXT_PUBLIC_DUMMY_MODE === "true") {
+      // 로그인 상태면 진입 경로 선택 화면으로(2026-10-01). 모드는 브라우저에
+      // 저장되므로 서버는 모르고, /start 가 클라이언트에서 판단해 넘긴다.
+      url.pathname = "/start";
     } else {
       url.pathname = "/landing";
     }

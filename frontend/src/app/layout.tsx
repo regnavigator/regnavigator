@@ -3,6 +3,7 @@ import { Inter, JetBrains_Mono } from "next/font/google";
 import { NuqsAdapter } from "nuqs/adapters/next/app";
 import { Toaster } from "sonner";
 import { AuthProvider } from "@/components/providers/AuthProvider";
+import { ModeProvider } from "@/components/providers/ModeProvider";
 import { ConsentGate } from "@/components/legal/ConsentGate";
 import { ProfileInit } from "@/components/auth/ProfileInit";
 import { ThemeToggleSlot } from "@/components/shell/ThemeToggleSlot";
@@ -81,57 +82,59 @@ export default function RootLayout({
           }}
         />
         <AuthProvider>
-          <NuqsAdapter>{children}</NuqsAdapter>
-          {/* 동의 기록 게이트 — needs_consent면 모달, signup draft 있으면 자동 제출 */}
-          <ConsentGate />
-          {/* 가입 폼 부가정보(이름/직군/소속) draft → backend /me/profile 자동 영속 */}
-          <ProfileInit />
-          {/* fixed 우상단 테마 토글 — landing path에선 자동 숨김 (URL 단위 theme) */}
-          <ThemeToggleSlot />
-          <Toaster
-            position="bottom-center"
-            theme="light"
-            duration={3500}
-            offset={120}
-            icons={{
-              // success/info는 보더 색 + 텍스트로 구분 충분 → hide 유지.
-              // error/warning은 색만으론 약함(색맹 사용자) → Material 아이콘 노출.
-              success: <span className="hidden" />,
-              info: <span className="hidden" />,
-              error: (
-                <span
-                  className="material-symbols-outlined shrink-0 text-[18px] text-md-error"
-                  aria-hidden
-                >
-                  error
-                </span>
-              ),
-              warning: (
-                <span
-                  className="material-symbols-outlined shrink-0 text-[18px] text-md-tertiary"
-                  aria-hidden
-                >
-                  warning
-                </span>
-              ),
-            }}
-            toastOptions={{
-              classNames: {
-                // 배경·텍스트·보더 모두 theme token (var()) — basic/medra/regia 자동 매칭.
-                // 보더는 --md-primary로 박아 테마별 시그니처 색이 자연스럽게 노출.
-                // shadow는 Tailwind utility(shadow-lg)로 — raw rgba 직접 작성 회피(R1).
-                toast:
-                  "!bg-md-surface !text-md-on-surface !border !border-md-primary !rounded-card !shadow-lg !px-4 !py-3 !text-[13.5px] !font-medium !gap-2",
-                title: "!text-md-on-surface !font-semibold !text-[14px]",
-                description: "!text-md-on-surface-variant !text-[12.5px]",
-                error: "!border-md-error",
-                actionButton:
-                  "!bg-md-primary !text-md-on-primary !rounded-pill !px-3 !text-[12px] !font-semibold",
-                cancelButton:
-                  "!bg-md-surface-container !text-md-on-surface-variant !rounded-pill !px-3 !text-[12px]",
-              },
-            }}
-          />
+          <ModeProvider>
+            <NuqsAdapter>{children}</NuqsAdapter>
+            {/* 동의 기록 게이트 — needs_consent면 모달, signup draft 있으면 자동 제출 */}
+            <ConsentGate />
+            {/* 가입 폼 부가정보(이름/직군/소속) draft → backend /me/profile 자동 영속 */}
+            <ProfileInit />
+            {/* fixed 우상단 테마 토글 — landing path에선 자동 숨김 (URL 단위 theme) */}
+            <ThemeToggleSlot />
+            <Toaster
+              position="bottom-center"
+              theme="light"
+              duration={3500}
+              offset={120}
+              icons={{
+                // success/info는 보더 색 + 텍스트로 구분 충분 → hide 유지.
+                // error/warning은 색만으론 약함(색맹 사용자) → Material 아이콘 노출.
+                success: <span className="hidden" />,
+                info: <span className="hidden" />,
+                error: (
+                  <span
+                    className="material-symbols-outlined shrink-0 text-[18px] text-md-error"
+                    aria-hidden
+                  >
+                    error
+                  </span>
+                ),
+                warning: (
+                  <span
+                    className="material-symbols-outlined shrink-0 text-[18px] text-md-tertiary"
+                    aria-hidden
+                  >
+                    warning
+                  </span>
+                ),
+              }}
+              toastOptions={{
+                classNames: {
+                  // 배경·텍스트·보더 모두 theme token (var()) — basic/medra/regia 자동 매칭.
+                  // 보더는 --md-primary로 박아 테마별 시그니처 색이 자연스럽게 노출.
+                  // shadow는 Tailwind utility(shadow-lg)로 — raw rgba 직접 작성 회피(R1).
+                  toast:
+                    "!bg-md-surface !text-md-on-surface !border !border-md-primary !rounded-card !shadow-lg !px-4 !py-3 !text-[13.5px] !font-medium !gap-2",
+                  title: "!text-md-on-surface !font-semibold !text-[14px]",
+                  description: "!text-md-on-surface-variant !text-[12.5px]",
+                  error: "!border-md-error",
+                  actionButton:
+                    "!bg-md-primary !text-md-on-primary !rounded-pill !px-3 !text-[12px] !font-semibold",
+                  cancelButton:
+                    "!bg-md-surface-container !text-md-on-surface-variant !rounded-pill !px-3 !text-[12px]",
+                },
+              }}
+            />
+          </ModeProvider>
         </AuthProvider>
       </body>
     </html>

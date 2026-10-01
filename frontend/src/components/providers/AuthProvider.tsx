@@ -46,7 +46,29 @@ function TokenGate({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
+/**
+ * dev 우회 — `NEXT_PUBLIC_AUTH_BYPASS`/`NEXT_PUBLIC_DUMMY_MODE` 면 SessionProvider 를
+ * 아예 마운트하지 않는다. 인증 DB 없이 띄울 때 `/api/auth/session` 이 500 을 내고
+ * 콘솔이 에러로 뒤덮여 실제 문제를 가리기 때문(2026-10-01). production 빌드에서는
+ * 두 플래그가 강제로 꺼지므로 운영 경로에는 영향이 없다.
+ */
+const AUTH_BYPASS =
+  process.env.NODE_ENV !== "production" &&
+  (process.env.NEXT_PUBLIC_AUTH_BYPASS === "true" ||
+    process.env.NEXT_PUBLIC_DUMMY_MODE === "true");
+
 export function AuthProvider({ children }: { children: ReactNode }) {
+  // dev 우회: SessionProvider 는 **유지**한다 — ConsentGate 등 여러 컴포넌트가
+  // useSession() 을 쓰므로 빼면 트리가 깨진다. 대신 `session={null}` 을 넘겨
+  // 초기 조회를 생략하고 재조회를 끈다(next-auth v4: session prop 이 주어지면
+  // _getSession 이 네트워크를 타지 않는다). TokenGate 도 건너뛴다 — 받을 토큰이 없다.
+  if (AUTH_BYPASS) {
+    return (
+      <SessionProvider session={null} refetchInterval={0} refetchOnWindowFocus={false}>
+        {children}
+      </SessionProvider>
+    );
+  }
   return (
     <SessionProvider>
       <TokenGate>{children}</TokenGate>

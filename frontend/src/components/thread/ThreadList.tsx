@@ -47,6 +47,8 @@ import {
 import { useRightPanel } from "@/lib/store/rightPanel";
 import { ThemeLogo } from "@/components/shell/ThemeLogo";
 import { PrivacyDialog } from "@/components/settings/PrivacyDialog";
+import { useMode } from "@/components/providers/ModeProvider";
+import { MODE_META } from "@/lib/store/mode";
 import { DocumentsDialog } from "@/components/panel/DocumentsDialog";
 
 type Props = {
@@ -73,6 +75,7 @@ export function ThreadList({ configured, refreshKey, onError, onCollapse, onOpen
   const userEmail = (session?.user as { email?: string | null } | undefined)?.email ?? null;
   // admin 판별 — NextAuth session(ADMIN_EMAILS env 매칭) 또는 backend usage 응답 둘 중 하나면 OK.
   // backend가 is_admin 안 보내도 ADMIN_EMAILS만 박혀있으면 UI 노출됨.
+  const { mode, showPro } = useMode();
   const sessionIsAdmin = !!(session?.user as { isAdmin?: boolean } | undefined)?.isAdmin;
   const isAdmin = sessionIsAdmin || !!usage?.is_admin;
   const [threadId] = useQueryState("threadId");
@@ -524,7 +527,26 @@ export function ThreadList({ configured, refreshKey, onError, onCollapse, onOpen
           </span>
           저장한 근거
         </button>
-        {/* 고객사 규제 모니터링 — 저장한 근거를 폴더(고객사)별로 묶어 개정 감지·정기 리포트. */}
+        {/* 현재 모드 표시 + 전환 — /start?pick=1 은 자동 이동 없이 선택 화면. */}
+        <Link
+          href="/start?pick=1"
+          title="진입 경로 전환 — 일반 상담 / 전문가 업무 / 규제 모니터링"
+          data-testid="mode-switch"
+          className="mb-1 flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-[12px] font-medium text-md-on-surface-variant transition-colors hover:bg-md-surface-container hover:text-md-on-surface"
+        >
+          <span className="material-symbols-outlined text-[15px]" aria-hidden>
+            {mode ? MODE_META[mode].icon : "tune"}
+          </span>
+          <span className="min-w-0 flex-1 truncate">
+            {mode ? MODE_META[mode].short : "모드"} 모드
+          </span>
+          <span className="material-symbols-outlined text-[14px] opacity-60" aria-hidden>
+            swap_horiz
+          </span>
+        </Link>
+        {/* 고객사 규제 모니터링 — 저장한 근거를 폴더(고객사)별로 묶어 개정 감지·정기 리포트.
+            일반 상담 모드에서는 감춘다. */}
+        {showPro ? (
         <Link
           href="/monitor"
           title="고객사별 규제 모니터링 — 개정 감지 리포트 설정"
@@ -535,6 +557,7 @@ export function ThreadList({ configured, refreshKey, onError, onCollapse, onOpen
           </span>
           고객사 모니터링
         </Link>
+        ) : null}
         {/* 이용 안내 — 한 칸(2026-08-27 요청). 행 클릭=매뉴얼(/guide),
             오른쪽 나침반 아이콘=30초 화면 투어. */}
         {/* hover 는 각자 — 행 전체 배경을 걸면 둘러보기에 올렸는데 이용
