@@ -36,7 +36,7 @@ export default function NotFound() {
         >
           <ThemeLogo className="h-8 w-auto" />
           <span className="text-[12px] uppercase tracking-[0.1em] text-md-on-surface-variant">
-            의료·규제 AI
+            규제 내비게이터
           </span>
         </Link>
 
@@ -77,7 +77,7 @@ export default function NotFound() {
 
       {/* 하단 footer — 약관·개인정보 일관 노출 */}
       <div className="relative z-10 mt-16 flex items-center gap-4 text-[11.5px] text-md-on-surface-variant">
-        <span>© {new Date().getFullYear()} MEDIREG AI</span>
+        <span>© {new Date().getFullYear()} RegNavigator</span>
         <Link href="/terms" className="hover:text-md-on-surface">
           이용약관
         </Link>

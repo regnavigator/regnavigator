@@ -18,9 +18,9 @@ import Link from "next/link";
 import { SiteNav } from "@/components/shell/SiteNav";
 
 export const metadata: Metadata = {
-  title: "이용 안내 · MEDIREG AI",
+  title: "이용 안내 · RegNavigator",
   description:
-    "MEDIREG AI 사용법 — 질문하기, IRB·DRB 심의 확인, 근거 확인, 심층 보고서, 서류 작성까지.",
+    "RegNavigator 사용법 — 질문하기, IRB·DRB 심의 확인, 근거 확인, 심층 보고서, 서류 작성까지.",
 };
 
 type Section = {
@@ -598,7 +598,7 @@ export default function GuidePage() {
         {/* 푸터 */}
         <footer className="mt-20 border-t border-md-outline-variant pt-8">
           <p className="text-[13.5px] leading-relaxed text-md-on-surface-variant">
-            MEDIREG AI는 규제 조사를 돕는 도구입니다. 최종 판단과 제출 책임은
+            RegNavigator는 규제 조사를 돕는 도구입니다. 최종 판단과 제출 책임은
             이용자에게 있으며, 중요한 사안은 반드시 원문과 관할 기관 안내를
             확인하세요.
           </p>

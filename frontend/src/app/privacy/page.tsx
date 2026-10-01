@@ -10,8 +10,8 @@ import type { Metadata } from "next";
 import { LegalDocPage } from "@/components/legal/LegalDocPage";
 
 export const metadata: Metadata = {
-  title: "개인정보처리방침 · MEDIREG AI",
-  description: "MEDIREG AI 개인정보처리방침",
+  title: "개인정보처리방침 · RegNavigator",
+  description: "RegNavigator 개인정보처리방침",
 };
 
 export default function PrivacyPage() {
@@ -19,7 +19,7 @@ export default function PrivacyPage() {
     <LegalDocPage
       doc="privacy"
       title="개인정보처리방침"
-      subtitle="MEDIREG AI는 이용자의 개인정보를 다음과 같이 처리합니다. AI 답변 생성을 위해 일부 정보가 국외 사업자에게 이전될 수 있습니다(제5조)."
+      subtitle="RegNavigator는 이용자의 개인정보를 다음과 같이 처리합니다. AI 답변 생성을 위해 일부 정보가 국외 사업자에게 이전될 수 있습니다(제5조)."
     />
   );
 }

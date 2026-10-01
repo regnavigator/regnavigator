@@ -1,5 +1,5 @@
 /**
- * /landing — MEDIREG AI 통합 랜딩.
+ * /landing — RegNavigator 통합 랜딩.
  *
  * 7 section + 1 footer를 scroll-snap-y mandatory로 페이지처럼 넘김.
  *   1. Hero        — 무엇을 하는 서비스인지 + 예시 질문
@@ -20,15 +20,15 @@ import Link from "next/link";
 import { HashScroll } from "./HashScroll";
 import { StartCta } from "./StartCta";
 import { SiteNav } from "@/components/shell/SiteNav";
-import { IrbExampleCards } from "./IrbExampleCards";
+import { EntryPathCards } from "./EntryPathCards";
 import { HeroExamples } from "./HeroExamples";
 import { LiveChatDemo } from "./LiveChatDemo";
 import { CorpusGrid } from "./CorpusGrid";
 import { RecentUpdates } from "./RecentUpdates";
 
 export const metadata = {
-  title: "MEDIREG AI · 의료규제 AI 에이전트",
-  description: "법령·고시·해석·판례를 벡터 DB와 웹 검색으로 통합 조회하는 의료·규제 전문 AI 에이전트.",
+  title: "RegNavigator · 한국 규제 내비게이터",
+  description: "법령·행정규칙·자치법규·판례를 근거와 함께 찾아주는 규제 내비게이터.",
 };
 
 /* ─────────────────── 데이터 ─────────────────── */
@@ -93,19 +93,19 @@ export default function LandingPage() {
       <section className="flex min-h-screen snap-start flex-col items-center justify-center px-8 sm:px-16">
         <div className="mx-auto flex w-full max-w-[1100px] flex-col items-center">
           <span className="text-[12px] font-semibold uppercase tracking-[0.16em] text-md-on-surface-variant">
-            MEDIREG · Medical Regulation AI
+            REGNAVIGATOR · Korean Regulation AI
           </span>
           <h1
             className="mt-5 text-center text-[44px] font-bold leading-[1.12] sm:text-[64px]"
             style={{ letterSpacing: "-0.025em" }}
           >
-            <span className="theme-grad-text">의료규제,</span>
+            <span className="theme-grad-text">규제,</span>
             <br />
-            <span>무엇이든 물어보세요.</span>
+            <span>근거까지 찾아드립니다.</span>
           </h1>
           <p className="mt-8 max-w-[600px] text-center text-[17px] leading-[1.8] text-md-on-surface-variant sm:text-[18px]">
-            법령·고시·해석례·판례를 벡터 DB와 최신 웹 검색으로 동시에 조회하는
-            의료·규제 전문 AI 에이전트.
+            법령·시행령·행정규칙(고시·별표)·자치법규·판례·해석례를 한 번에 찾아
+            조문과 시행일까지 함께 보여드립니다.
           </p>
 
           {/* 예시 카드 — 누르면 실제 답변 예시 모달(2026-09-02). 데이터·모달은 HeroExamples. */}
@@ -137,23 +137,18 @@ export default function LandingPage() {
       <section className="flex min-h-screen snap-start flex-col items-center justify-center px-8 py-16 sm:px-16">
         <div className="mx-auto w-full max-w-[1100px]">
           <div className="text-center">
-            <SectionEyebrow>02 · IRB · DRB</SectionEyebrow>
+            <SectionEyebrow>02 · Entry</SectionEyebrow>
             <SectionTitle>
-              <span>연구 심의, 시작 전에 </span>
-              <span className="theme-grad-text">먼저 확인.</span>
+              <span>쓰는 사람에 맞춰 </span>
+              <span className="theme-grad-text">들어갑니다.</span>
             </SectionTitle>
             <p className="mx-auto mt-8 max-w-[640px] text-[17px] leading-[1.8] text-md-on-surface-variant">
-              내 연구가 IRB 심의 대상인지, 면제·신속·정규 중 어디인지 —
-              기관 지침 기준으로 예비판정하고, 의료데이터 연구의 DRB 심의까지 함께 확인합니다.
+              같은 법령을 보더라도 필요한 건 서로 다릅니다. 세 가지 경로 중 하나로
+              시작하면 화면과 기능이 그에 맞게 준비됩니다. 언제든 바꿀 수 있습니다.
             </p>
           </div>
 
-          {/* 단계 카드 — 누르면 실제 사용 예시 모달(2026-09-02 피드백). 데이터·모달은 IrbExampleCards. */}
-          <IrbExampleCards />
-          <p className="mx-auto mt-10 max-w-[640px] text-center text-[13px] leading-[1.7] text-md-on-surface-variant/80">
-            판정 기준: 화순전남대학교병원 IRB·DRB 지침 — AI의 예비판단이며, 최종 판단은
-            소속 기관 심의 사무국을 따릅니다.
-          </p>
+          <EntryPathCards />
         </div>
       </section>
 
@@ -235,7 +230,7 @@ export default function LandingPage() {
           <div className="text-center">
             <SectionEyebrow>05 · Coverage</SectionEyebrow>
             <SectionTitle>
-              <span>의료 규제 코퍼스를 </span>
+              <span>전국 규제 코퍼스를 </span>
               <span className="theme-grad-text">통합 색인.</span>
             </SectionTitle>
             <p className="mx-auto mt-8 max-w-[640px] text-[17px] leading-[1.8] text-md-on-surface-variant">
@@ -299,7 +294,7 @@ export default function LandingPage() {
                 </>
               }
             >
-              MEDIREG AI 시작하기
+              RegNavigator 시작하기
               <span className="material-symbols-outlined text-[18px]" aria-hidden>
                 arrow_forward
               </span>
@@ -412,13 +407,13 @@ export default function LandingPage() {
           </h2>
           <ul className="grid grid-cols-1 gap-4 text-[15px] leading-[1.75] text-md-on-surface-variant sm:grid-cols-2">
             <LimitBullet>일상 잡담·코드 작성·번역 같은 범용 질문</LimitBullet>
-            <LimitBullet>개별 환자의 진단·치료 권고 (의료 행위 대체 X)</LimitBullet>
+            <LimitBullet>개별 사안에 대한 법률 자문 (변호사 업무 대체 X)</LimitBullet>
             <LimitBullet>법적 자문 — 답변은 참고용, 최종 판단은 전문가 검토 권장</LimitBullet>
             <LimitBullet>실시간 환자 데이터·전자의무기록(EMR) 접근</LimitBullet>
           </ul>
 
           <div className="mt-10 flex flex-col items-start justify-between gap-3 border-t border-md-outline-variant pt-6 text-[12px] text-md-on-surface-variant sm:flex-row sm:items-center">
-            <span>© {new Date().getFullYear()} MEDIREG AI · 의료·규제 도메인 AI</span>
+            <span>© {new Date().getFullYear()} RegNavigator · 한국 규제 내비게이터</span>
             <nav className="flex items-center gap-4">
               <Link href="/guide" className="hover:text-md-on-surface">
                 이용 안내

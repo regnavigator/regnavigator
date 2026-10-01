@@ -20,7 +20,7 @@ export default function Loading() {
             className="text-[19px] font-bold tracking-tight text-md-on-surface"
             style={{ letterSpacing: "-0.02em" }}
           >
-            MEDIREG AI
+            RegNavigator
           </span>
         </div>
         <div className="flex items-center gap-2.5 text-md-on-surface-variant">
@@ -29,7 +29,7 @@ export default function Loading() {
             aria-hidden
           />
           <p role="status" className="animate-md-shimmer text-body-sm font-medium">
-            의료 규제 상담을 준비하고 있어요…
+            규제 상담을 준비하고 있어요…
           </p>
         </div>
       </div>

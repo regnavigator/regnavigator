@@ -10,8 +10,8 @@ import type { Metadata } from "next";
 import { LegalDocPage } from "@/components/legal/LegalDocPage";
 
 export const metadata: Metadata = {
-  title: "이용약관 · MEDIREG AI",
-  description: "MEDIREG AI 서비스 이용약관",
+  title: "이용약관 · RegNavigator",
+  description: "RegNavigator 서비스 이용약관",
 };
 
 export default function TermsPage() {
@@ -19,7 +19,7 @@ export default function TermsPage() {
     <LegalDocPage
       doc="terms"
       title="이용약관"
-      subtitle="MEDIREG AI(이하 “서비스”) 이용에 관한 회사와 이용자 간 권리·의무를 규정합니다. 본 서비스는 베타(시험 운영) 단계입니다."
+      subtitle="RegNavigator(이하 “서비스”) 이용에 관한 회사와 이용자 간 권리·의무를 규정합니다. 본 서비스는 베타(시험 운영) 단계입니다."
     />
   );
 }
