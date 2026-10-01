@@ -396,15 +396,19 @@ export function ThreadList({ configured, refreshKey, onError, onCollapse, onOpen
           낮을 때 보고서 빈 칸이 과점해 대화 목록이 좁은 스크롤이 되던 문제 —
           실측 피드백 2026-07-24). 넘치면 섹션 내부 스크롤. */}
       <div className="flex max-h-[200px] min-h-[64px] shrink-0 flex-col overflow-hidden pb-2">
+        {/* 심층 보고서 — 전문가 전용(2026-10-01 모드 분기) */}
+        {showPro ? (
         <ReportsSection
           reports={displayReports}
           onPreview={(r) => setPreviewReport(r)}
         />
+        ) : null}
       </div>
 
       {/* 작성한 서식 — 다시 열기·삭제(2026-09-18). 없으면 섹션 자체를 숨겨
           대화 목록 공간을 뺏지 않는다. */}
-      <DocumentsSection refreshKey={refreshKey} />
+      {/* 작성한 서식 — 전문가 전용 */}
+      {showPro ? <DocumentsSection refreshKey={refreshKey} /> : null}
 
 
       {/* 채팅 목록 — 남은 공간 (flex-1) */}

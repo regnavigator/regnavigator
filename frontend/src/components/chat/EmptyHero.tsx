@@ -12,6 +12,7 @@
  */
 
 import { useMemo, useState } from "react";
+import { useMode } from "@/components/providers/ModeProvider";
 import { useSession } from "next-auth/react";
 import {
   Dialog,
@@ -52,85 +53,111 @@ const CATEGORY_ICON: Record<string, string> = {
   "연구 심의 (IRB·DRB)": "fact_check",
 };
 
-const SAMPLE_PROMPTS: SamplePrompt[] = [
+const EXPERT_PROMPTS: SamplePrompt[] = [
   {
-    category: "허가·서식",
-    title: "의료기기 품목허가 절차와 제출 서식",
+    category: "인허가·서식",
+    title: "인허가 절차와 제출 서식 찾기",
     subtitle: "단계별 절차 · 별표/서식 · 필요 서류",
     expects: [
-      "허가·인증·신고 중 어디에 해당하는지와 단계별 절차",
-      "제출해야 하는 별표·서식과 첨부 서류 목록(원본 서식 바로 작성 가능)",
-      "근거 조문(의료기기법·시행규칙)과 시행일",
+      "허가·등록·신고 중 어디에 해당하는지와 단계별 절차",
+      "제출할 별표·서식과 첨부 서류 목록(원본 서식 바로 작성 가능)",
+      "근거 조문과 시행일",
     ],
     form: {
-      intro: "제품 정보를 입력하면 더 정확한 절차·서식 안내를 받을 수 있습니다.",
+      intro: "대상을 적으면 더 정확한 절차·서식 안내를 받을 수 있습니다.",
       fields: [
-        { key: "product", label: "제품명/품목 (선택)", placeholder: "예: 혈당측정기" },
-        { key: "grade", label: "등급 (알면)", placeholder: "예: 2등급" },
-        { key: "kind", label: "구분", placeholder: "예: 제조 / 수입" },
+        { key: "subject", label: "대상 (사업·제품·행위)", placeholder: "예: 체외진단 의료기기 / 일반음식점" },
+        { key: "detail", label: "추가 조건 (선택)", placeholder: "예: 2등급, 수입" },
       ],
       build: (v) =>
-        v.product
-          ? `${v.product}${v.grade ? ` (${v.grade})` : ""}${v.kind ? ` ${v.kind}` : ""} 품목허가 절차를 단계별로 알려줘. 제출해야 하는 서식·별표와 필요 서류도 함께 정리해줘.`
-          : "의료기기 품목허가 절차를 단계별로 알려줘. 제출해야 하는 서식·별표와 필요 서류도 함께 정리해줘.",
+        v.subject
+          ? `${v.subject}${v.detail ? ` (${v.detail})` : ""} 인허가 절차를 단계별로 알려줘. 제출해야 하는 서식·별표와 필요 서류도 함께 정리해줘.`
+          : "인허가 절차를 단계별로 알려줘. 제출 서식·별표와 필요 서류도 정리해줘.",
     },
   },
   {
-    category: "광고·심의",
-    title: "의료기기 광고 심의 기준",
-    subtitle: "심의 대상 · 신청 절차 · 금지 표현",
+    category: "고시·별표",
+    title: "고시·행정규칙의 세부 기준 확인",
+    subtitle: "별표 본문 · 적용 범위 · 개정 이력",
     expects: [
-      "사전심의 대상 여부와 신청 절차·처리 기간",
-      "금지 표현과 위반 시 처벌 조항",
-      "관련 판례·해석례가 있으면 함께 인용",
+      "법률·시행령에 없고 고시 별표에만 있는 세부 기준",
+      "적용 대상과 예외",
+      "최근 개정 여부와 시행일",
     ],
   },
   {
-    category: "임상시험",
-    title: "임상시험 IND 승인 절차",
-    subtitle: "단계별 제출 서류 · 심사 기간",
+    category: "자치법규",
+    title: "지자체 조례로 달라지는 요건",
+    subtitle: "관할별 편차 · 입지·시설 기준",
     expects: [
-      "IND 승인 단계와 제출 서류",
-      "심사 기간과 변경 승인 요건",
-      "근거 고시·가이드라인 원문 위치",
+      "같은 사안에서 지자체별로 갈리는 요건",
+      "조례·규칙 근거 조문",
+      "관할 기관에 확인해야 할 항목",
     ],
   },
   {
     category: "판례·해석",
-    title: "비대면 진료 관련 판례·유권해석",
+    title: "쟁점에 대한 판례·유권해석",
     subtitle: "쟁점 판례 · 행정해석 · 적용 범위",
     expects: [
-      "쟁점별 판례 요지와 선고일",
-      "행정해석(유권해석)의 결론과 적용 범위",
-      "현행 법령 조문과의 연결",
+      "법원이 어떻게 판단했는지(법원·심급 포함)",
+      "행정해석과 판례가 갈리는 지점",
+      "내 사안에 적용되는 범위",
     ],
   },
-  // IRB/DRB 명시 진입점(2026-08-21) — AI 키워드 감지와 별개의 이중 접근.
-  // 조립 프롬프트에 'IRB' 키워드가 들어가 백엔드 프리게이트도 확실히 걸린다.
+];
+
+const PUBLIC_PROMPTS: SamplePrompt[] = [
   {
-    category: "연구 심의 (IRB·DRB)",
-    title: "연구 심의 대상인지 확인하기",
-    subtitle: "심의면제·신속·정규 판정 · 절차·서식 안내 — 화순전남대병원 기준",
+    category: "생활·계약",
+    title: "임대차 보증금·계약 문제",
+    subtitle: "보증금 반환 · 계약 해지 · 수리 책임",
     expects: [
-      "IRB 심의 대상 여부와 종류(면제·신속·정규) 예비 판정",
-      "DRB(자료 반출) 필요 여부와 IRB 와의 선후",
-      "절차·제출 서류 목록(서류 초안 작성으로 이어짐)",
+      "지금 할 수 있는 조치를 순서대로",
+      "근거가 되는 법 조문",
+      "전문가 상담이 필요한 시점",
     ],
-    featured: true,
+  },
+  {
+    category: "일터",
+    title: "임금·해고·휴가 문제",
+    subtitle: "체불 임금 · 해고 절차 · 연차",
+    expects: [
+      "어디에 어떻게 신고하는지",
+      "근거 조문과 기한",
+      "준비해야 할 자료",
+    ],
+  },
+  {
+    category: "창업·영업",
+    title: "업종별 인허가와 영업신고",
+    subtitle: "필요한 허가 · 순서 · 제출 서류",
+    expects: [
+      "무엇을 → 어디에 → 어떤 서류로 내는지",
+      "인허가와 사업자등록의 선후",
+      "관할 지자체에 확인할 항목",
+    ],
     form: {
-      intro:
-        "연구 개요를 입력하면 IRB(연구윤리)·DRB(의료데이터) 심의 대상 여부와 절차를 안내합니다. (화순전남대학교병원 지침 기준 예비판단)",
+      intro: "업종을 적으면 더 정확한 절차를 안내받을 수 있습니다.",
       fields: [
-        {
-          key: "outline",
-          label: "연구 개요 (선택)",
-          placeholder: "예: 후향적 의무기록 연구, 당뇨 환자 300명 EMR 데이터 분석",
-        },
-        { key: "data", label: "사용 데이터 (알면)", placeholder: "예: 진료기록, 검사결과, 잔여검체" },
+        { key: "biz", label: "업종", placeholder: "예: 카페 / 온라인 쇼핑몰" },
+        { key: "region", label: "지역 (선택)", placeholder: "예: 서울 마포구" },
       ],
       build: (v) =>
-        `다음 연구가 IRB 심의 대상인지, 심의면제·신속·정규 중 어디에 해당하는지 판정해줘. 병원 의료데이터를 쓰면 DRB 심의도 함께 확인해줘.\n연구 개요: ${v.outline}${v.data ? `\n사용 데이터: ${v.data}` : ""}`,
+        v.biz
+          ? `${v.biz}${v.region ? ` (${v.region})` : ""} 창업에 필요한 인허가와 영업신고 절차를 순서대로 알려줘. 어디에 어떤 서류를 내야 하는지도 알려줘.`
+          : "창업에 필요한 인허가와 영업신고 절차를 순서대로 알려줘.",
     },
+  },
+  {
+    category: "행정처분",
+    title: "과태료·행정처분을 받았을 때",
+    subtitle: "이의신청 · 기한 · 감경 사유",
+    expects: [
+      "이의신청 방법과 기한",
+      "감경·면제 사유가 있는지",
+      "근거 조문",
+    ],
   },
 ];
 
@@ -161,6 +188,13 @@ export function EmptyHero({ configured, onPickPrompt }: Props) {
     return null;
   }, [session]);
 
+  const { showPro } = useMode();
+  // 진입 경로에 따라 예시와 안내 문구가 갈린다(2026-10-01).
+  const SAMPLE_PROMPTS = showPro ? EXPERT_PROMPTS : PUBLIC_PROMPTS;
+  const subtitle = showPro
+    ? "법령·고시·자치법규·판례를 근거와 함께 찾아드립니다."
+    : "궁금한 것을 일상어로 물어보세요. 절차와 근거를 함께 알려드립니다.";
+
   const greeting = useMemo(() => {
     const time = getTimeGreeting();
     return userName ? `${time}, ${userName}님` : time;
@@ -189,7 +223,7 @@ export function EmptyHero({ configured, onPickPrompt }: Props) {
           {greeting}
         </h1>
         <p className="mt-2.5 text-[15px] text-md-on-surface-variant">
-          궁금한 의료 규제를 물어보세요.
+          {subtitle}
         </p>
       </div>
 

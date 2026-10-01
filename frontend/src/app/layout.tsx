@@ -41,8 +41,8 @@ export const viewport: Viewport = {
 
 export const metadata: Metadata = {
   manifest: "/manifest.webmanifest",
-  title: "MEDIREG AI",
-  description: "법령·고시·해석·판례를 벡터 DB와 웹 검색으로 통합 조회하는 의료·규제 전문 AI 에이전트.",
+  title: "RegNavigator",
+  description: "법령·시행령·행정규칙·자치법규·판례·해석례를 근거와 함께 찾아주는 규제 내비게이터.",
 };
 
 export default function RootLayout({

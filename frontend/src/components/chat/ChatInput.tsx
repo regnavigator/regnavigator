@@ -424,8 +424,8 @@ export function ChatInput({
                     : disabled
                       ? "설정을 먼저 입력하세요"
                       : irbMode
-                        ? "IRB/DRB 심의에 대해 물어보세요 — 심의 대상 판정·절차·서식 (화순전남대병원 기준)"
-                        : "MEDIREG AI에 메시지 보내기"
+                        ? "IRB/DRB 심의에 대해 물어보세요 — 심의 대상 판정·절차·서식"
+                        : "RegNavigator에 메시지 보내기"
               }
               rows={MIN_ROWS}
               className="block w-full resize-none border-0 bg-transparent px-6 pb-3 pr-16 pt-5 text-[15px] leading-[1.6] text-md-on-surface placeholder:text-md-on-surface-variant focus:outline-none disabled:cursor-not-allowed disabled:text-md-on-surface-variant"
@@ -490,6 +490,7 @@ export function ChatInput({
             </button>
             {/* IRB/DRB 모드 — AI 키워드 감지와 별개의 명시 진입(이중 접근).
                 켜면 화순전남대병원 심의 지침 기반으로 안내됨을 배지로 표시. */}
+            {showPro ? (
             <button
               type="button"
               data-tour="irb"
@@ -517,6 +518,7 @@ export function ChatInput({
               </span>
               IRB/DRB
             </button>
+            ) : null}
             <button
               type="button"
               onClick={toggleFeedback}

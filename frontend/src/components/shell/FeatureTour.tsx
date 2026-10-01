@@ -24,7 +24,7 @@ type Step = {
 const STEPS: Step[] = [
   {
     selector: null,
-    title: "MEDIREG 이용 안내",
+    title: "RegNavigator 이용 안내",
     desc: "법령·별표/서식·판례 근거로 답하는 규제 상담 도구입니다.\n30초만에 핵심 기능을 짚어드릴게요.",
   },
   {

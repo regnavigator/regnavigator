@@ -86,7 +86,7 @@ export function SiteNav({
   const logo = (
     <Link
       href="/landing"
-      aria-label="MEDIREG AI 홈"
+      aria-label="RegNavigator 홈"
       className="inline-flex shrink-0 items-center gap-2 text-md-on-surface"
     >
       <span
@@ -97,7 +97,7 @@ export function SiteNav({
         gavel
       </span>
       <span className="text-[15px] font-bold tracking-tight" style={{ letterSpacing: "-0.02em" }}>
-        MEDIREG AI
+        RegNavigator
       </span>
     </Link>
   );
