@@ -346,9 +346,9 @@ export function ThreadList({ configured, refreshKey, onError, onCollapse, onOpen
       <div className="flex items-center justify-between gap-2 px-1">
         <button
           type="button"
-          onClick={() => router.push("/landing")}
-          aria-label="메인 페이지로"
-          title="메인 페이지로"
+          onClick={() => router.push("/start?pick=1")}
+          aria-label="진입 경로 선택으로"
+          title="진입 경로 선택 — 일반 상담 / 전문가 업무 / 규제 모니터링"
           className="group inline-flex items-center gap-2 px-1 py-1 text-left transition-colors"
         >
           <ThemeLogo className="h-7 w-auto group-hover:opacity-80" />

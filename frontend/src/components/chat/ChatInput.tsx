@@ -10,7 +10,6 @@
  */
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { getAnswerStyle, setAnswerStyle } from "@/lib/store/turns";
 import { useMode } from "@/components/providers/ModeProvider";
 import { getMyPrefs, setReportEmailOptIn } from "@/lib/client/prefs";
 import { extractFile, type ExtractedAttachment } from "@/lib/client/files";
@@ -85,7 +84,6 @@ export function ChatInput({
   const [value, setValue] = useState("");
   // IRB/DRB 모드 — AI 키워드 감지와 별개의 명시 진입 버튼(이중 접근, 2026-08-21).
   // 켜져 있는 동안 전송마다 skill_hint 로 동반. 사용자가 끌 때까지 유지.
-  const [irbMode, setIrbMode] = useState(false);
   // 첨부 문서 — /files/extract 추출 결과를 전송 전까지 들고 있는다(서버 무상태).
   const [attachments, setAttachments] = useState<ExtractedAttachment[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -176,7 +174,7 @@ export function ChatInput({
     onSend(
       text,
       attachments.length ? attachments : undefined,
-      irbMode ? "irb_drb" : null,
+      null,
     );
     setValue("");
     setAttachments([]);
@@ -423,9 +421,7 @@ export function ChatInput({
                     ? "사용량 한도 초과 — 한도 리셋 후 다시 가능"
                     : disabled
                       ? "설정을 먼저 입력하세요"
-                      : irbMode
-                        ? "IRB/DRB 심의에 대해 물어보세요 — 심의 대상 판정·절차·서식"
-                        : "RegNavigator에 메시지 보내기"
+                      : "RegNavigator에 메시지 보내기"
               }
               rows={MIN_ROWS}
               className="block w-full resize-none border-0 bg-transparent px-6 pb-3 pr-16 pt-5 text-[15px] leading-[1.6] text-md-on-surface placeholder:text-md-on-surface-variant focus:outline-none disabled:cursor-not-allowed disabled:text-md-on-surface-variant"
@@ -490,35 +486,7 @@ export function ChatInput({
             </button>
             {/* IRB/DRB 모드 — AI 키워드 감지와 별개의 명시 진입(이중 접근).
                 켜면 화순전남대병원 심의 지침 기반으로 안내됨을 배지로 표시. */}
-            {showPro ? (
-            <button
-              type="button"
-              data-tour="irb"
-              onClick={() => setIrbMode((v) => !v)}
-              aria-pressed={irbMode}
-              aria-label={
-                irbMode
-                  ? "IRB/DRB 상담 모드 해제"
-                  : "IRB/DRB 상담 모드 — 연구 심의(IRB)·의료데이터 심의(DRB) 전문 안내"
-              }
-              title={
-                irbMode
-                  ? "IRB/DRB 상담 모드 해제"
-                  : "IRB/DRB 상담 — 연구 심의 대상 판정·절차·서식 안내 (화순전남대병원 기준)"
-              }
-              className={
-                "inline-flex h-9 items-center gap-1.5 rounded-full px-3.5 text-[13px] font-medium transition-colors " +
-                (irbMode
-                  ? "bg-md-primary-fixed text-md-on-primary-fixed-variant shadow-sm"
-                  : "text-md-on-surface-variant hover:bg-md-surface-container-low hover:text-md-on-surface")
-              }
-            >
-              <span className="material-symbols-outlined text-[16px]" aria-hidden>
-                clinical_notes
-              </span>
-              IRB/DRB
-            </button>
-            ) : null}
+
             <button
               type="button"
               onClick={toggleFeedback}
@@ -606,11 +574,6 @@ export function ChatInput({
                   {value.length.toLocaleString()} / {MAX_INPUT_CHARS.toLocaleString()}자
                 </span>
               ) : null}
-              {showPro ? (
-                <div data-tour="style">
-                  <AnswerStyleToggle />
-                </div>
-              ) : null}
             </div>
           </div>
         </div>
@@ -623,47 +586,6 @@ export function ChatInput({
 }
 
 /** 답변 설명 수준 토글 — 기본/전문가/쉬움. localStorage 저장, 매 전송에 style 로 동반. */
-function AnswerStyleToggle() {
-  const [style, setStyle] = useState<"expert" | "simple" | null>(() => getAnswerStyle());
-  const pick = (v: "expert" | "simple" | null) => {
-    setAnswerStyle(v);
-    setStyle(v);
-  };
-  const OPTIONS: Array<{ v: "expert" | "simple" | null; label: string; title: string }> = [
-    { v: null, label: "기본", title: "기본 설명 수준" },
-    { v: "expert", label: "전문가", title: "RA/QA 대상 — 조문 중심, 간결" },
-    { v: "simple", label: "쉬움", title: "비전문가 대상 — 쉬운 용어·한 줄 해설" },
-  ];
-  return (
-    <div
-      role="radiogroup"
-      aria-label="답변 설명 수준"
-      className="inline-flex items-center rounded-pill bg-md-surface-container p-0.5"
-    >
-      {OPTIONS.map((o) => (
-        <button
-          key={o.label}
-          type="button"
-          role="radio"
-          aria-checked={style === o.v}
-          title={o.title}
-          onClick={() => pick(o.v)}
-          className={
-            "rounded-pill px-2.5 py-1 text-[11px] font-medium transition-colors " +
-            (style === o.v
-              ? "bg-md-surface text-md-on-surface shadow-sm"
-              : "text-md-on-surface-variant hover:text-md-on-surface")
-          }
-        >
-          {o.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-
-/** 보고서 완료 이메일 수신 토글 — 서버 설정(/me/prefs)과 동기. */
 function ReportEmailOptRow() {
   const [optIn, setOptIn] = useState<boolean | null>(null);
   useEffect(() => {

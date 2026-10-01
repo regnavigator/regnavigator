@@ -40,16 +40,6 @@ const STEPS: Step[] = [
     desc: "PDF·DOCX·HWPX 문서를 붙여 질문할 수 있어요. 긴 규정·계약서도 첨부하면 내용을 읽고 답합니다.",
   },
   {
-    selector: "[data-tour='irb']",
-    title: "IRB/DRB 상담 모드",
-    desc: "이 버튼을 켜면 연구 심의(IRB)·의료데이터 심의(DRB) 전문 모드로 상담합니다.\n버튼 없이 그냥 질문해도, 첫 화면 카드로 시작해도 됩니다.",
-  },
-  {
-    selector: "[data-tour='style']",
-    title: "설명 수준",
-    desc: "전문가(RA/QA)는 조문 중심 간결하게, 쉬움은 용어 해설을 곁들여 답합니다.",
-  },
-  {
     selector: "[data-tour='report']",
     title: "심층 보고서",
     desc: "목적을 골라 생성하면 백그라운드에서 만들어집니다. 기다릴 필요 없어요 — 채팅을 계속하다 보면 완료 시 사이드바 목록과 이메일로 도착합니다.",
