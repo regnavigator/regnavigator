@@ -88,7 +88,10 @@ export default async function middleware(req: NextRequest, event: NextFetchEvent
                process.env.NEXT_PUBLIC_DUMMY_MODE === "true") {
       // 로그인 상태면 진입 경로 선택 화면으로(2026-10-01). 모드는 브라우저에
       // 저장되므로 서버는 모르고, /start 가 클라이언트에서 판단해 넘긴다.
+      // `auto=1` 은 "저장된 모드가 있으면 바로 보내라"는 뜻 — 사용자가 주소창에
+      // /start 를 직접 치면 이 값이 없으므로 항상 선택 화면이 뜬다.
       url.pathname = "/start";
+      url.searchParams.set("auto", "1");
     } else {
       url.pathname = "/landing";
     }

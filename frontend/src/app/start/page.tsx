@@ -4,8 +4,11 @@
  * `/start` — 진입 경로 선택 (2026-10-01).
  *
  * 로그인 뒤 첫 화면. 세 경로 중 하나를 고르면 그 모드로 들어간다.
- * 이미 고른 적이 있으면 자동으로 넘어가고, `?pick=1` 이면 항상 선택 화면을
- * 보여준다(사이드바의 '모드 전환'이 이 쿼리로 들어온다).
+ *
+ * 자동 이동은 **`?auto=1` 일 때만** 한다 — 미들웨어가 `/` 를 여기로 보낼 때 붙인다.
+ * 주소창에 `/start` 를 직접 치거나 사이드바의 '모드 전환'(`?pick=1`)으로 들어오면
+ * 항상 선택 화면을 보여준다. 저장된 모드가 있다고 무조건 튕기면 "안 열린다"로
+ * 보인다(2026-10-01 실사용 지적).
  */
 
 import { useRouter, useSearchParams } from "next/navigation";
@@ -38,7 +41,9 @@ function StartInner() {
   const { mode, ready, setMode } = useMode();
   const [picking, setPicking] = useState<AppMode | null>(null);
 
-  const forcePick = params.get("pick") === "1";
+  // 자동 이동은 `/` 에서 넘어온 경우(auto=1)에만. 주소창에 /start 를 직접 치거나
+  // 사이드바로 전환하러 온 경우(pick=1)는 항상 선택 화면을 보여준다.
+  const forcePick = params.get("auto") !== "1" || params.get("pick") === "1";
 
   // 이미 고른 모드가 있으면 바로 넘어간다 (단, 전환하러 온 경우는 제외).
   useEffect(() => {
