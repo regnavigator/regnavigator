@@ -90,6 +90,9 @@ ENV_REGISTRY: tuple[Setting, ...] = (
     Setting("COVERAGE_JUDGE_MAX_CITES", "35", "chatloop",
             "이 건수 이상 근거를 이미 확보했으면 3층 LLM 커버리지 판정 스킵"
             "(판정 1콜+추가 검색 라운드로 턴당 ~6s — 근거가 충분한 턴엔 낭비)"),
+    Setting("APPLICABILITY_JUDGE_DISABLE", "", "chatloop",
+            "1=적용가능성 판정(하이쿠 1콜) 끔. 규칙이 못 잡는 '닮았지만 적용 안 되는' "
+            "근거가 인용에 남는다"),
     Setting("COVERAGE_JUDGE_ENABLE", "1", "chatloop",
             "1=근거 커버리지 LLM 판정(3층, Haiku 1콜) 활성. 0=규칙(0건 재검색·명시 종별)만"),
     # 기관 내부 지침 스킬 (IRB/DRB — src/skills/, 2026-08-10)
@@ -129,10 +132,20 @@ ENV_REGISTRY: tuple[Setting, ...] = (
     Setting("RAG_SEARCH_TIMEOUT_S", "20", "search", "검색 API 타임아웃(리랭커 콜드 대비)"),
     Setting("RAG_SEARCH_TARGET_TYPES", None, "search", "검색 종별 CSV 재정의(미설정=law,admrul,ordin,prec,expc — 법령+판례+해석례)"),
     Setting("SEARCH_MAX_CONCURRENCY", "2", "search", "동시 /search 호출 상한(백프레셔 — GPU thrash 방지)"),
+    Setting("SEARCH_WAIT_TIMEOUT_S", "30", "search",
+            "검색 슬롯 대기 상한(초). 초과 시 거절 — 무한 대기가 스레드풀을 고갈시켜 전 요청을 멈추던 것 차단"),
+    Setting("PII_GATE_ALLOW_NO_NER", "0", "guardrail",
+            "1=NER 미설정을 명시 허용(dev 전용). 0(기본)=미설정이면 strict 게이트가 입력을 차단"),
+    Setting("LOG_LEVEL", "INFO", "ops", "앱 로거 레벨(DEBUG/INFO/WARNING). root 핸들러에 적용"),
     Setting("SEARCH_KEEPALIVE_S", "240", "search", "리랭커 웜핑 주기 초(0=끔) — 콜드 검색 방지"),
     Setting("SEARCH_INCLUDE_PENDING", "1", "search",
             "1=같은 조문의 시행예정본을 현행 hit 뒤에 동반 요청(0=현행만). "
             "서버 미배포 시 조용히 생략되므로 켠 채 안전"),
+    Setting("SOURCE_FILTER_DISABLE", "", "search",
+            "1=출처 적합성 필터 끔 ⚠️ 의미는 닮았으나 적용되지 않는 법령"
+            "(타 지자체 조례·타 대상 특별법 등)이 인용에 그대로 섞인다"),
+    Setting("SOURCE_FILTER_TAIL_RATIO", "0.12", "search",
+            "점수 꼬리 컷 — 최고점 대비 이 비율 미만이면 제외(음수 점수는 항상 제외)"),
     Setting("QDRANT_TOP_K", "12", "search", "검색 top_k(반환 조문 수). 서버 rerank_pool=25 이내 — GPU 무관, 리랭킹 후 슬라이스"),
     # guardrail (입력 게이트)
     Setting("PII_GATE_DISABLE", None, "guardrail", "1=입력 PII 스크럽 게이트 끔"),
@@ -370,8 +383,14 @@ ENV_REGISTRY: tuple[Setting, ...] = (
     Setting("WEEKLY_REPORT_SEND_WEEKDAY", "0", "ops",
             "주간 보고서 발송 요일 0=월~6=일 — 기본값, 관리자 화면 저장값이 우선"),
     Setting("WEEKLY_REPORT_CHECK_INTERVAL_S", "900", "ops", "주간 보고서 발송 점검 주기(초). 0=루프 끔"),
+    Setting("MONITOR_RECOMMEND_DISABLE", "", "report",
+            "1=관찰 추천(하이쿠 1콜) 끔. 후보 목록만 보여 준다"),
+    Setting("MONITOR_ALERT_INTERVAL_S", "3600", "report",
+            "규제 변경 감지 주기(초). 발송 주기와 별개 — 감지는 자주, 발송은 드물게"),
+    Setting("MONITOR_ALERT_DISABLE", "", "report",
+            "1=변경 감지 루프 끔(알람이 쌓이지 않는다)"),
     Setting("MONITOR_REPORT_CHECK_INTERVAL_S", "900", "ops",
-            "고객사 규제 모니터링 리포트 발송 점검 주기(초). 0=루프 끔"),
+            "규제 모니터링 리포트 발송 점검 주기(초). 0=루프 끔"),
     Setting("MONITOR_REPORT_SEND_ON_NO_CHANGE", "0", "ops",
             "변경 0건이어도 리포트를 보낼지(1=보냄). 기본 0=생략"),
     Setting("USAGE_WEEKLY_SNAPSHOT_INTERVAL_S", "21600", "ops",

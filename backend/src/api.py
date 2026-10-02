@@ -45,6 +45,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
+from src.logging_setup import setup_logging
+
+setup_logging()  # root 핸들러 — 이게 없으면 앱 info/debug 가 전부 사라진다
+
 from src.middleware import (
     AuthMiddleware,
     QuotaMiddleware,
@@ -206,6 +210,12 @@ async def _lifespan(_app: FastAPI):
         monitor_interval = 900.0
     monitor_task = (asyncio.create_task(_monitor_report_loop(monitor_interval))
                     if monitor_interval > 0 else None)
+    # 변경 감지 루프(2026-10-02) — 발송과 주기가 다르다.
+    from src.monitor_alerts import check_interval_s as _alert_interval
+
+    _alert_off = (os.getenv("MONITOR_ALERT_DISABLE") or "").strip() == "1"
+    alert_task = (asyncio.create_task(_monitor_alert_loop(_alert_interval()))
+                  if not _alert_off else None)
     # 스킬 로컬 모델 워밍(2026-09-15) — 첫 사용자 턴이 tool 지원 확인 비용을 내지
     # 않게 부팅 직후 백그라운드로 한 번 확인(성공은 KV 에 남아 재시작에도 유지).
     try:
@@ -220,7 +230,7 @@ async def _lifespan(_app: FastAPI):
         yield
     finally:
         tasks = [t for t in (ka_task, warm_task, notice_task, usage_task, report_task,
-                             monitor_task)
+                             monitor_task, alert_task)
                  if t is not None]
         for t in tasks:
             t.cancel()
@@ -284,8 +294,8 @@ async def _weekly_report_loop(interval: float) -> None:
 
 
 async def _monitor_report_loop(interval: float) -> None:
-    """고객사 규제 모니터링 리포트 발송 점검. 부팅 직후 3분 뒤 첫 점검.
-    ⚠️ 예외는 삼키되 로그는 남긴다 — 조용히 죽으면 고객사 리포트가 영영 안 간다."""
+    """규제 모니터링 리포트 발송 점검. 부팅 직후 3분 뒤 첫 점검.
+    ⚠️ 예외는 삼키되 로그는 남긴다 — 조용히 죽으면 대상 리포트가 영영 안 간다."""
     from src.monitor_report import run_due
 
     await asyncio.sleep(min(180.0, interval))
@@ -294,6 +304,24 @@ async def _monitor_report_loop(interval: float) -> None:
             await asyncio.to_thread(run_due)
         except Exception:  # noqa: BLE001 — 한 주기 실패가 루프를 끝내면 안 됨
             _log.exception("[monitor_report] 점검 실패 — 다음 주기 재시도")
+        await asyncio.sleep(interval)
+
+
+async def _monitor_alert_loop(interval: float) -> None:
+    """규제 변경 감지 → 알람 적재 (2026-10-02). 발송 루프와 **별개**다.
+
+    감지는 자주, 발송은 드물게가 맞다. 법령 DB 가 죽어 있으면
+    `monitor_alerts.detect_all` 이 적재를 건너뛴다 — "변경 없음"과 "확인 못 함"을
+    섞지 않기 위해서다.
+    ⚠️ 예외는 삼키되 로그는 남긴다 — 조용히 죽으면 알람이 영영 안 뜬다."""
+    from src.monitor_alerts import detect_all
+
+    await asyncio.sleep(min(120.0, interval))
+    while True:
+        try:
+            await asyncio.to_thread(detect_all)
+        except Exception:  # noqa: BLE001 — 한 주기 실패가 루프를 끝내면 안 됨
+            _log.exception("[monitor_alerts] 감지 실패 — 다음 주기 재시도")
         await asyncio.sleep(interval)
 
 
@@ -418,6 +446,6 @@ app.include_router(privacy_router)  # /me/consent · /me/data · /me/erase
 app.include_router(chat_router)     # POST /chat — 자체 SSE 루프 (ADR-0001 Phase 1)
 app.include_router(files_router)    # POST /files/extract — 채팅 첨부 텍스트 추출
 app.include_router(beta_router)     # POST /beta/check — 가입 화이트리스트 확인 (공개)
-app.include_router(monitor_router)  # /monitor/targets — 고객사 규제 모니터링
+app.include_router(monitor_router)  # /monitor/targets — 규제 모니터링
 app.include_router(announcements_router)  # /announcements — 패치노트(최초 접속 팝업)
 app.include_router(notices_router)  # /me/notices · /admin/notices — 사용자별 앱 내 알림(2026-09-15)

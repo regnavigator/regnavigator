@@ -33,6 +33,14 @@ type RightPanelCtx = {
   setCitation: (id: string | null) => void;
   setDocPath: (path: string | null) => void;
   setDocumentId: (id: string | null) => void;
+  /**
+   * 조합 탭이 켜져 있는가 (2026-10-02).
+   *
+   * 위 세 키와 **상호 배타가 아니다** — 조합을 짜면서 근거를 보는 건 자연스럽다.
+   * 그래서 배타 집합에 넣지 않고 탭으로 전환한다.
+   */
+  composer: boolean;
+  setComposer: (v: boolean) => void;
 };
 
 const Ctx = createContext<RightPanelCtx | null>(null);
@@ -46,6 +54,7 @@ export function RightPanelProvider({
   const [citation, setCitationState] = useState("");
   const [docPath, setDocPathState] = useState("");
   const [documentId, setDocumentIdState] = useState("");
+  const [composer, setComposerState] = useState(false);
   // ✨ 패널 열림/인용 전환을 View Transition으로 감쌈 — 지원 브라우저에서
   // 크로스페이드·morph(vt-citation-card), 미지원/reduced-motion은 즉시 적용.
   const setOpen = useCallback((v: boolean) => {
@@ -81,6 +90,9 @@ export function RightPanelProvider({
       }
     });
   }, []);
+  const setComposer = useCallback((v: boolean) => {
+    withViewTransition(() => setComposerState(v));
+  }, []);
   const value = useMemo(
     () => ({
       open,
@@ -92,9 +104,11 @@ export function RightPanelProvider({
       setCitation,
       setDocPath,
       setDocumentId,
+      composer,
+      setComposer,
     }),
     [open, setOpen, toggle, citation, docPath, documentId,
-     setCitation, setDocPath, setDocumentId],
+     setCitation, setDocPath, setDocumentId, composer, setComposer],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
@@ -112,6 +126,8 @@ export function useRightPanel(): RightPanelCtx {
       setCitation: () => {},
       setDocPath: () => {},
       setDocumentId: () => {},
+      composer: false,
+      setComposer: () => {},
     };
   }
   return ctx;

@@ -109,6 +109,9 @@ export type Message = {
   report_id?: string;
   /** ai 한정 — 자동 이어쓰기 상한 후에도 max_tokens 잘림(라이브 세션 전용) */
   truncated?: boolean;
+  /** 기능 조합의 중간 단계(2026-10-02) — 기본 렌더에서 빠지고 "과정 보기"로만
+   *  펼쳐진다. 모델 컨텍스트에는 들어가 있다(숨김은 렌더 계층의 일). */
+  hidden?: boolean;
 };
 
 /* ─────────────────── front-derived Turn (03 §2.2) ─────────────────── */
@@ -120,6 +123,8 @@ export type Turn = {
   status: "running" | "done" | "error" | "interrupted";
   /** "report_overview" — 보고서 완료 개요 전용 턴(사용자 말풍선 없음, 완료 카드 렌더) */
   kind?: "report_overview";
+  /** 조합의 중간 단계 턴 — 기본 목록에서 숨긴다. 마지막 종합만 보인다. */
+  hidden?: boolean;
   /** ms epoch */
   started_at: number;
   ended_at?: number;

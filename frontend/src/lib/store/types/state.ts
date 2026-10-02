@@ -24,6 +24,18 @@ export type ChatState = {
   turns: Turn[];
   /** 최근 시스템 에러 (단절·인증 등) — `04 §4.3` InlineErrorBanner */
   error?: { message: string; retriable: boolean } | null;
+  /**
+   * 이 스레드에 기밀 턴이 있었는가(2026-10-01). 기밀을 끄면 저장된 이전 대화가
+   * 통째로 외부 모델로 가므로, 끄기 전에 경고하는 근거가 된다.
+   */
+  confidential_seen?: boolean;
+  /** 스레드 종류(2026-10-02) — 'monitor' 면 관찰 목록·알람 UI 가 붙는다. */
+  kind?: string;
+  /**
+   * 진행 중인 기능 조합(2026-10-02) — 기능 id 배열 + 다음 단계 커서.
+   * 서버가 들고 있어 새로고침·다른 기기에서도 이어진다.
+   */
+  workflow?: { steps: string[]; cursor: number } | null;
   // ※ deep_dispatched_at·deep_baseline_done·deep_progress는 단일 thread
   //   전환(2026-05-19)으로 폐기 — 세팅하는 코드가 없어 dead field였다.
   /**

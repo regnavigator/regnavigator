@@ -205,9 +205,11 @@ async def judge_coverage(
         from langchain_core.messages import HumanMessage
 
         from src.config import settings
-        from src.models import build_chat_model
+        from src.chat_loop import aux_model
 
-        model = build_chat_model(settings.subagent_model, max_tokens=500)
+        model = aux_model(settings.subagent_model, max_tokens=500)
+        if model is None:
+            return None  # 기밀 턴 + 원내 없음 — 심판 생략(근거 보강 없이 진행)
         resp = await asyncio.wait_for(
             model.ainvoke([HumanMessage(content=prompt)]), timeout_s
         )

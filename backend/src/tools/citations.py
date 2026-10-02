@@ -472,6 +472,16 @@ def _build_openlaw_citation(payload: dict, number: int, pg_meta: dict) -> Citati
     )
     if cat:
         out["doc_category"] = cat
+    # attachment_subtype — "별표" / "서식" / "서식별표" (2026-10-01).
+    #
+    # doc_category 는 `법령별표서식` 하나로 별표와 서식을 뭉뚱그린다. FE 는 그래서
+    # 제목에 "서식" 이라는 글자가 있는지로 둘을 갈랐는데, `공중위생관리법 시행규칙
+    # 별표: 영업신고서` 처럼 **서식인데 제목에 '별표'만 있는** 경우가 흔해
+    # 기입 버튼이 뜨지 않았다(실사용 신고). 검색 API 가 이미 정확히 알려주는
+    # 값을 버리고 추측하던 것 — 그 값을 그대로 넘긴다.
+    sub = (payload.get("attachment_subtype") or "").strip()
+    if sub:
+        out["attachment_subtype"] = sub
     # url — law.go.kr 외부 링크. 별표/서식은 /별표/N 경로로 박힘. frontend
     # lawLink.ts:deriveExternalUrl 가 citation.url 최우선 사용.
     ext_url = _external_url_for_citation(payload, pg_meta)
@@ -591,6 +601,11 @@ def build_citation_from_api_hit(hit: dict, number: int) -> Citation:
     )
     if cat:
         out["doc_category"] = cat
+    # attachment_subtype — "별표" / "서식" (2026-10-01). 위 `_build_openlaw_citation`
+    # 과 같은 이유: doc_category(`법령별표서식`)만으로는 별표와 서식을 못 가른다.
+    _sub = (hit.get("attachment_subtype") or "").strip()
+    if _sub:
+        out["attachment_subtype"] = _sub
     # url — 서버가 조합한 law.go.kr 정본 링크. http(s) 만 통과 — guide 의
     # source_url 이 인제스트 머신 로컬 경로로 오는 케이스(실측 2026-07-24) 차단
     # (깨진 링크 + 내부 경로 노출 방지).

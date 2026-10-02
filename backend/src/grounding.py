@@ -79,13 +79,18 @@ async def ground_citations(body: str, citations: list[dict], *, model=None) -> l
         return citations
     llm = model
     if llm is None:
-        from src.models import build_chat_model  # Phase 5: init_chat_model 폐기
-        llm = build_chat_model(
+        from src.chat_loop import aux_model  # 기밀 턴이면 원내/생략(2026-10-03)
+        llm = aux_model(
             os.getenv("GROUND_MODEL")
             or os.getenv("REPORT_GROUND_MODEL")
             or os.getenv("SUBAGENT_MODEL")
             or "anthropic:claude-haiku-4-5-20251001",
+            max_tokens=1200,
         )
+        if llm is None:
+            # 기밀 턴 + 원내 없음 — 검증 생략. verified 를 True 로 찍지 않는다
+            # (검증 안 한 것을 검증됐다고 하면 안 된다). 인용은 그대로 둔다.
+            return citations
     quotes: dict[int, str] = {}
     try:
         # grounding JSON 은 사용자 답변 아님 — 태그로 FE 토큰 스트림 필터.
@@ -236,12 +241,15 @@ async def audit_uncited_claims(body: str, haystack: str, *, model=None) -> list[
         return []
     llm = model
     if llm is None:
-        from src.models import build_chat_model
-        llm = build_chat_model(
+        from src.chat_loop import aux_model  # 기밀 턴이면 원내/생략(2026-10-03)
+        llm = aux_model(
             os.getenv("GROUND_MODEL")
             or os.getenv("SUBAGENT_MODEL")
             or "anthropic:claude-haiku-4-5-20251001",
+            max_tokens=1200,
         )
+        if llm is None:
+            return []  # 기밀 턴 + 원내 없음 — 감사 생략(측정 채널일 뿐)
     prompt = (
         _AUDIT_PROMPT
         + "\n[출처]\n" + haystack[:_AUDIT_SRC_CAP]

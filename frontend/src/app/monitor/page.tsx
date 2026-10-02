@@ -1,9 +1,11 @@
 "use client";
 
+import Link from "next/link";
+
 /**
- * 고객사 규제 모니터링 — 배송 설정 · 미리보기 · 수동 발송 (2026-10-01).
+ * 규제 모니터링 — 배송 설정 · 미리보기 · 수동 발송 (2026-10-01).
  *
- * 저장해 둔 근거(북마크)를 고객사(=폴더)별로 묶어, 그 조문의 폐지·개정예정·
+ * 저장해 둔 근거(북마크)를 대상(=폴더)별로 묶어, 그 조문의 폐지·개정예정·
  * 시행일 변경을 주기적으로 감지해 지정 수신자에게 리포트를 보낸다.
  * 백엔드 계약: backend `routes/monitor.py` · `docs/contracts/API.md`.
  *
@@ -91,7 +93,7 @@ export default function MonitorPage() {
 
   const onSubmit = async () => {
     if (!form.folder.trim()) {
-      toast.error("고객사(폴더)를 선택하거나 입력해 주세요.");
+      toast.error("모니터링 대상(폴더)을 선택하거나 입력해 주세요.");
       return;
     }
     if (!form.recipients.trim()) {
@@ -105,7 +107,7 @@ export default function MonitorPage() {
         toast.success("설정을 수정했습니다.");
       } else {
         await createMonitorTarget(form);
-        toast.success("고객사를 등록했습니다.");
+        toast.success("모니터링 대상을 등록했습니다.");
       }
       resetForm();
       await reload();
@@ -200,12 +202,34 @@ export default function MonitorPage() {
 
   return (
     <main className="mx-auto w-full max-w-[1100px] px-6 py-8">
+      {/* 돌아갈 길(2026-10-02) — 이 화면에 들어오면 브라우저 뒤로가기 외에
+          나갈 방법이 없었다(실사용 신고). 앱 안의 화면은 앱으로 돌아갈 수 있어야 한다. */}
+      <nav className="mb-4 flex items-center gap-3 text-[12.5px]">
+        <Link
+          href="/new"
+          data-testid="monitor-back"
+          className="inline-flex items-center gap-1 text-md-primary hover:underline"
+        >
+          <span className="material-symbols-outlined text-[16px]" aria-hidden>
+            arrow_back
+          </span>
+          대화로 돌아가기
+        </Link>
+        <Link href="/alerts" className="text-md-on-surface-variant hover:text-md-primary">
+          알람 모아보기
+        </Link>
+      </nav>
+
       <header className="mb-6">
-        <h1 className="text-[22px] font-bold text-md-primary">고객사 규제 모니터링</h1>
-        <p className="mt-1 text-[13px] text-md-on-surface-variant">
-          저장해 둔 근거를 고객사별로 묶어, 그 조문의{" "}
-          <b>폐지 · 개정예정 · 시행일 변경</b>을 감지해 정기 리포트로 보냅니다.
-          고객사 구분은 <b>근거 저장 시 지정한 폴더</b>를 씁니다.
+        <h1 className="text-[22px] font-bold text-md-primary">정기 리포트 배송 설정</h1>
+        <p className="mt-1 text-[13px] leading-relaxed text-md-on-surface-variant">
+          저장해 둔 근거(북마크)를 폴더별로 묶어, 그 조문의{" "}
+          <b>폐지 · 개정예정 · 시행일 변경</b>을 감지해 <b>정기</b> 리포트로 보냅니다.
+        </p>
+        <p className="mt-2 rounded-[8px] border border-md-outline-variant bg-md-surface-container-lowest px-3 py-2 text-[12px] leading-relaxed text-md-on-surface-variant">
+          <b>모니터링 대상은 이제 대화(스레드)로 만듭니다.</b> 왼쪽 사이드바의{" "}
+          <b>규제 모니터링</b> 섹션에서 대상을 만들고, 대화로 규제를 찾아 관찰 목록에
+          담으세요. 이 화면은 <b>폴더 기반 정기 발송</b> 설정만 남아 있습니다.
         </p>
       </header>
 
@@ -214,11 +238,11 @@ export default function MonitorPage() {
       {/* ── 등록/수정 폼 ─────────────────────────────────────────── */}
       <section className="mb-8 rounded-[8px] border border-md-outline-variant bg-md-surface-container-low p-5">
         <h2 className="mb-4 text-[15px] font-bold">
-          {editingId ? "설정 수정" : "고객사 등록"}
+          {editingId ? "설정 수정" : "대상 등록"}
         </h2>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <label className="flex flex-col gap-1.5">
-            <span className="text-[12px] font-medium">고객사 폴더 *</span>
+            <span className="text-[12px] font-medium">대상 폴더 *</span>
             <input
               list="monitor-folders"
               value={form.folder}
@@ -234,7 +258,7 @@ export default function MonitorPage() {
           </label>
 
           <label className="flex flex-col gap-1.5">
-            <span className="text-[12px] font-medium">고객사 표시명</span>
+            <span className="text-[12px] font-medium">대상 표시명</span>
             <input
               value={form.label ?? ""}
               onChange={(e) => setForm({ ...form, label: e.target.value })}
@@ -319,7 +343,7 @@ export default function MonitorPage() {
       {/* ── 목록 ─────────────────────────────────────────────────── */}
       <section>
         <h2 className="mb-3 text-[15px] font-bold">
-          등록된 고객사 {targets.length > 0 && `(${targets.length})`}
+          등록된 대상 {targets.length > 0 && `(${targets.length})`}
         </h2>
 
         {loading ? (
@@ -328,7 +352,7 @@ export default function MonitorPage() {
           </div>
         ) : targets.length === 0 ? (
           <p className="rounded-[8px] border border-dashed border-md-outline-variant px-4 py-10 text-center text-[13px] text-md-on-surface-variant">
-            아직 등록된 고객사가 없습니다. 먼저 답변의 근거를 북마크하고 폴더를 지정한 뒤,
+            아직 등록된 대상가 없습니다. 먼저 답변의 근거를 북마크하고 폴더를 지정한 뒤,
             위에서 등록해 주세요.
           </p>
         ) : (
@@ -336,7 +360,7 @@ export default function MonitorPage() {
             <table className="w-full border-collapse text-[13px]">
               <thead>
                 <tr className="bg-md-surface-container">
-                  {["고객사", "관찰", "수신자", "주기", "다음 발송", "최근 발송", ""].map(
+                  {["대상", "관찰", "수신자", "주기", "다음 발송", "최근 발송", ""].map(
                     (h) => (
                       <th
                         key={h}

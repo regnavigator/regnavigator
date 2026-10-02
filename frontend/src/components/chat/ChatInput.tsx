@@ -9,12 +9,20 @@
  * - 파일 첨부(v1, 2026-08-05): /files/extract 업로드 → 칩 → 전송 시 attachments.
  */
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useMode } from "@/components/providers/ModeProvider";
-import { getConfidential, setConfidential as persistConfidential } from "@/lib/store/mode";
+import {
+  CONFIDENTIAL_CHANGED_EVENT,
+  OPEN_ATTACH_EVENT,
+  OPEN_BRIEF_EVENT,
+  OPEN_WATCH_EVENT,
+  getConfidential,
+  setConfidential as persistConfidential,
+} from "@/lib/store/mode";
 import { getMyPrefs, setReportEmailOptIn } from "@/lib/client/prefs";
 import { extractFile, type ExtractedAttachment } from "@/lib/client/files";
 import { toast } from "sonner";
+import { FeaturePicker } from "@/components/feature/FeaturePicker";
 import { DisclaimerHint } from "@/components/legal/DisclaimerHint";
 import {
   Popover,
@@ -47,6 +55,12 @@ type Props = {
   overLimitNotice?: string | null;
   /** 쿼터 80% 사전 경고 문구 — 초과 전(80~99%)에만 상위가 전달. 세션 내 dismiss 가능. */
   quotaWarning?: string | null;
+  /** 이 스레드에 기밀 턴이 있었는가 — 끄려 할 때 경고 근거(2026-10-01) */
+  confidentialSeen?: boolean;
+  /** 기밀 토글은 스레드 단위(2026-10-03) — 없으면(`/new`) 전역 키를 쓴다 */
+  threadId?: string | null;
+  /** 모니터링 스레드인가 — 관찰 목록 버튼 노출 기준(2026-10-02) */
+  isMonitor?: boolean;
   /** 심층 보고서 수동 트리거 — 대화가 있는 idle 상태에서 호스트가 전달.
    *  미전달 시 버튼 숨김(첫 화면·진행 중·한도 초과). */
   onManualReport?: (purpose?: string | null) => void;
@@ -54,6 +68,8 @@ type Props = {
   prefill?: string | null;
   /** prefill 한 번 적용 후 호스트에 알림 (한 번만 채우게) */
   onPrefillConsumed?: () => void;
+  /** 조합 패널 열기(2026-10-02) — 전문가 전용. 미전달 시 버튼 숨김 */
+  onOpenComposer?: () => void;
   /** 보내기. running=false 일 때만 호출됨. attachments = /files/extract 결과.
    *  skillHint = "irb_drb" — IRB/DRB 모드 켜진 상태로 전송(백엔드 명시 진입). */
   onSend: (
@@ -74,16 +90,37 @@ export function ChatInput({
   overLimitNotice = null,
   quotaWarning = null,
   onManualReport,
+  confidentialSeen = false,
+  threadId = null,
+  isMonitor = false,
   prefill,
   onPrefillConsumed,
+  onOpenComposer,
   onSend,
   onStop,
 }: Props) {
   // 보고서 기능 가용성(2026-09-07) — 일시 중단이면 버튼 비활성 + 배너, writer 다운이면 경고
-  const { showPro } = useMode();   // 일반 상담 모드에서는 전문가 기능을 감춘다
+  const { mode, showPro } = useMode();   // 일반 상담 모드에서는 전문가 기능을 감춘다
   const [confidential, setConfidentialState] = useState(false);
   // localStorage 는 SSR 에서 못 읽으므로 mount 뒤 채운다(hydration 불일치 방지).
-  useEffect(() => { setConfidentialState(getConfidential()); }, []);
+  useEffect(() => {
+    setConfidentialState(getConfidential(threadId));
+    // 다른 컴포넌트(서식 작성 진입 등)가 자동으로 켜면 토글도 따라와야 한다.
+    // 스레드가 바뀌면 그 스레드의 값으로 다시 읽는다(deps 의 threadId).
+    const sync = (e: Event) => {
+      const d = (e as CustomEvent<{ on: boolean; threadId: string | null }>).detail;
+      if (d && d.threadId !== (threadId ?? null)) return; // 다른 스레드 이벤트
+      setConfidentialState(d ? d.on : getConfidential(threadId));
+    };
+    window.addEventListener(CONFIDENTIAL_CHANGED_EVENT, sync);
+    // 첫 화면 "문서 검토" 카드 → 파일 선택창. 기밀은 handleFiles 가 켠다.
+    const openAttach = () => fileInputRef.current?.click();
+    window.addEventListener(OPEN_ATTACH_EVENT, openAttach);
+    return () => {
+      window.removeEventListener(CONFIDENTIAL_CHANGED_EVENT, sync);
+      window.removeEventListener(OPEN_ATTACH_EVENT, openAttach);
+    };
+  }, [threadId]);
   const reportsAvail = useReportsAvailability();
   const [value, setValue] = useState("");
   // IRB/DRB 모드 — AI 키워드 감지와 별개의 명시 진입 버튼(이중 접근, 2026-08-21).
@@ -144,6 +181,18 @@ export function ChatInput({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefill]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  /** 기능 피커가 조립한 템플릿을 입력창에 넣는다 — 자동 전송하지 않는다. */
+  const applyPrefill = useCallback((text: string) => {
+    setValue(text);
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (el) {
+        el.focus();
+        el.setSelectionRange(el.value.length, el.value.length);
+      }
+    });
+  }, []);
 
   // 자동 grow — 매 입력마다 height 재계산 (P4.1)
   useLayoutEffect(() => {
@@ -214,6 +263,19 @@ export function ChatInput({
       toast.error(`첨부는 한 번에 ${MAX_ATTACHMENTS}개까지 가능합니다.`, { duration: 6000 });
       return;
     }
+    // 문서를 올리는 순간 기밀 모드를 켠다(2026-10-01) — 사건 파일·계약서를
+    // 올리는 가장 흔한 경로다. 켜졌다는 사실은 토스트로 알리고, 원하면 끌 수 있다.
+    if (showPro && !confidential) {
+      setConfidentialState(true);
+      persistConfidential(true, threadId);
+      toast.info("문서를 첨부해 기밀 모드를 켰습니다 — 이 대화는 원내 모델로만 처리됩니다.", {
+        duration: 7000,
+        action: {
+          label: "끄기",
+          onClick: () => { setConfidentialState(false); persistConfidential(false, threadId); },
+        },
+      });
+    }
     setUploading(true);
     try {
       for (const f of files) {
@@ -282,6 +344,24 @@ export function ChatInput({
       className="sticky bottom-0 w-full bg-transparent px-6 pb-4 pt-0"
     >
       <div className="mx-auto w-full max-w-[820px]">
+        {/* 보호 모드 고지(2026-10-01) — 입력 **전에** 보여야 한다. 푸터 맨 아래에
+            두면 화면 밖으로 밀려 아무도 못 본다(2026-10-01 실측). */}
+        {confidential ? (
+          <div
+            data-testid="confidential-banner"
+            role="status"
+            className="mb-2 flex items-start gap-1.5 rounded-[10px] border border-md-primary bg-md-primary-container/40 px-3 py-2 text-[11.5px] leading-[1.6] text-md-on-surface"
+          >
+            <span className="material-symbols-outlined mt-[1px] text-[14px] text-md-primary" aria-hidden>
+              shield_lock
+            </span>
+            <span className="break-keep">
+              <b>기밀 모드</b> — 이 대화는 <b>원내(온프레미스) 모델로만</b> 처리되고
+              웹 검색을 쓰지 않습니다. 개인정보는 마스킹 후 저장되며, 이전 대화 내용도
+              함께 참고합니다.
+            </span>
+          </div>
+        ) : null}
         {/* 서버 혼잡 배지 — busy일 때만 노출 */}
         <LoadBadge />
         {/* 보고서 기능 일시 중단(운영자 토글) 또는 writer 다운 — 채팅은 정상이라는 점을 명시 */}
@@ -497,8 +577,22 @@ export function ChatInput({
                 data-testid="confidential-toggle"
                 onClick={() => {
                   const next = !confidential;
+                  // 끄는 경우: 이 스레드에 기밀 내용이 이미 들어갔다면 다음 턴에
+                  // **저장된 이전 대화가 통째로 외부 모델로 간다**. 명시 확인을 받는다.
+                  if (!next && confidentialSeen) {
+                    // 사실대로 쓴다(2026-10-03). 종전 문구("외부 모델로 전송됩니다")는
+                    // **반대**였다 — 백엔드 `_drop_sensitive` 가 기밀 메시지를 컨텍스트
+                    // 에서 **빼기** 때문에 전송되지 않는다. 진짜 위험은 그 반대쪽이다:
+                    // 모델이 사건 내용을 더 이상 보지 못한 채 답한다.
+                    const ok = window.confirm(
+                      "기밀 모드를 끄면 이 대화의 기밀 내용(사건 파일·사실관계)을 " +
+                      "모델이 더 이상 보지 않습니다 — 외부로 보내지 않기 위해서입니다.\n\n" +
+                      "다음 답변은 그 내용을 모르는 채 작성됩니다. 계속하시겠습니까?",
+                    );
+                    if (!ok) return;
+                  }
                   setConfidentialState(next);
-                  persistConfidential(next);
+                  persistConfidential(next, threadId);
                 }}
                 aria-pressed={confidential}
                 aria-label={confidential ? "기밀 모드 해제" : "기밀 모드 — 원내 모델로만 처리"}
@@ -539,6 +633,67 @@ export function ChatInput({
               </span>
               피드백
             </button>
+            {/* 관찰 목록(2026-10-02) — 모니터링 스레드에서만. 이 스레드가 무엇을
+                보고 있는지는 늘 한 번에 열려야 한다. */}
+            {isMonitor ? (
+              <button
+                type="button"
+                data-testid="watch-open"
+                onClick={() => window.dispatchEvent(new CustomEvent(OPEN_WATCH_EVENT))}
+                title="이 대상이 관찰 중인 조문"
+                className="inline-flex h-9 items-center gap-1.5 rounded-full px-3.5 text-[13px] font-medium text-md-on-surface-variant transition-colors hover:bg-md-surface-container-low hover:text-md-on-surface"
+              >
+                <span className="material-symbols-outlined text-[16px]" aria-hidden>
+                  visibility
+                </span>
+                관찰 목록
+              </button>
+            ) : null}
+            {/* 기능 피커 — **일반 상담에는 두지 않는다**(2026-10-02).
+                일반인 모드는 "그냥 물어보면 답한다"가 전부여야 한다. 기능을
+                고르게 하는 순간 무엇을 골라야 할지부터 배워야 하는 도구가 된다.
+                기능과 조합은 전문가 모드의 차별점으로 남긴다. */}
+            {mode !== "public" ? (
+              <FeaturePicker
+                ctx={{ mode, hasTurns: !!onManualReport }}
+                disabled={running || overLimit}
+                onPrefill={applyPrefill}
+                threadId={threadId}
+              />
+            ) : null}
+            {/* 조합(2026-10-02) — 전문가 전용. 짜는 화면은 우측 패널에 상주한다. */}
+            {onOpenComposer ? (
+              <button
+                type="button"
+                data-testid="composer-open"
+                onClick={onOpenComposer}
+                disabled={running || overLimit}
+                className="inline-flex h-9 items-center gap-1.5 rounded-full px-3.5 text-[13px] font-medium text-md-on-surface-variant transition-colors hover:bg-md-surface-container-low hover:text-md-on-surface disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <span className="material-symbols-outlined text-[16px]" aria-hidden>
+                  lab_profile
+                </span>
+                조합
+              </button>
+            ) : null}
+            {/* 의견서 초안 — 지금까지의 대화와 그 인용으로 서면 골격을 만든다
+                (2026-10-01). 보고서와 달리 **즉시** 열리고, 내용은 문단 단위로
+                고쳐 채운다. 전문가 경로 전용. */}
+            {showPro && onManualReport ? (
+              <button
+                type="button"
+                data-testid="brief-open"
+                disabled={running}
+                onClick={() => window.dispatchEvent(new CustomEvent(OPEN_BRIEF_EVENT))}
+                title="지금까지의 대화로 의견서 초안을 만듭니다 — 문단별로 고쳐 쓸 수 있습니다"
+                className="inline-flex h-9 items-center gap-1.5 rounded-full px-3.5 text-[13px] font-medium text-md-on-surface-variant transition-colors hover:bg-md-surface-container-low hover:text-md-on-surface disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <span className="material-symbols-outlined text-[16px]" aria-hidden>
+                  draft
+                </span>
+                의견서 초안
+              </button>
+            ) : null}
             {/* 심층 보고서 수동 트리거 — AI 제안(next_steps)에만 의존하던 발견성 개선.
                 일반 상담 모드에서는 감춘다(2026-10-01 모드 분기). */}
             {onManualReport && showPro ? (

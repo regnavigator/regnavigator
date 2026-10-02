@@ -159,3 +159,69 @@ def test_three_confidential_notices_are_distinct():
         sl.CONFIDENTIAL_NOT_CONFIGURED_NOTICE,    # 기밀 모드인데 아예 미설정
     }
     assert len(notices) == 3
+
+
+# ── 처리 경로 고지 (2026-10-01) ──────────────────────────────────────────────
+
+def test_processing_mode_emitted_only_after_local_routing_confirmed():
+    """`processing_mode` 는 **라우팅이 확정된 뒤** 나가야 한다.
+
+    확정 전에 보내면 거짓 안심이 된다 — 로컬이 다운이면 그 턴은 답을 못 하는데
+    사용자는 "원내에서 처리됨" 고지를 먼저 본다.
+    """
+    import inspect
+
+    import src.chat_loop as cl
+
+    src = inspect.getsource(cl)
+    i_guard = src.index('_log.warning("skill_local: 로컬 모델 사용 불가')
+    i_ok = src.index('_log.info("skill_local: 로컬 라우팅')
+    i_emit = src.index('"type": "processing_mode"')
+
+    assert i_guard < i_ok < i_emit, (
+        "processing_mode 가 '로컬 사용 가능' 확정 이후가 아니다")
+
+
+def test_processing_mode_never_claims_web_search():
+    """로컬 라우팅 턴은 웹 도구를 못 받는다 — 고지도 그 사실과 일치해야 한다."""
+    import inspect
+    import re
+
+    import src.chat_loop as cl
+
+    block = inspect.getsource(cl)
+    seg = block[block.index('"type": "processing_mode"'):]
+    seg = seg[:seg.index("})") + 2]
+    assert re.search(r'"web_search":\s*False', seg), seg
+    assert '"local": True' in seg
+
+
+@pytest.fixture()
+def _threads_repo(tmp_path, monkeypatch):
+    """테스트 스코프 SQLite ThreadsRepo (test_chat_loop 와 같은 패턴)."""
+    import src.persistence.threads_repo as tr
+
+    monkeypatch.setenv("REPORTS_BACKEND", "sqlite")
+    monkeypatch.setenv("REPORTS_SQLITE_PATH", str(tmp_path / "chat.db"))
+    monkeypatch.setattr(tr, "_repo", None)
+    yield tr.get_threads_repo()
+    monkeypatch.setattr(tr, "_repo", None)
+
+
+def test_thread_marks_and_reports_confidential_history(_threads_repo):
+    threads_repo = _threads_repo
+    """기밀 이력은 영속돼야 한다 — 기밀을 끌 때 경고할 근거다.
+
+    이력이 없으면 FE 는 "이전 대화가 상용 모델로 나간다"는 경고를 띄울 수 없고,
+    사용자는 저장된 사건 파일 내용이 외부로 가는 것을 모른 채 토글을 끈다.
+    """
+    threads_repo.ensure_thread("t_conf", user_id="u1")
+
+    assert not threads_repo.get_meta("t_conf").get("confidential_seen")
+
+    threads_repo.mark_confidential("t_conf")
+    assert threads_repo.get_meta("t_conf").get("confidential_seen")
+
+    # 멱등 — 여러 기밀 턴이 이어져도 상태가 흔들리지 않는다.
+    threads_repo.mark_confidential("t_conf")
+    assert threads_repo.get_meta("t_conf").get("confidential_seen")

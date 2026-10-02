@@ -1,10 +1,10 @@
-"""MonitorTargetsRepo — 고객사별 규제 모니터링 배송 설정.
+"""MonitorTargetsRepo — 대상별 규제 모니터링 배송 설정.
 
-로펌이 고객사(=`bookmarks.folder`)별로 관심 법령을 모아 두면, 그 폴더의 개정·폐지를
+로펌이 대상(=`bookmarks.folder`)별로 관심 법령을 모아 두면, 그 폴더의 개정·폐지를
 주기적으로 감지해 지정 수신자에게 리포트를 보낸다. **북마크 구조는 건드리지 않고**
 폴더별 "배송 설정"만 이 테이블이 갖는다(2026-10-01).
 
-UNIQUE(user_id, folder) — 한 담당자가 같은 고객사에 대해 설정을 둘 이상 두지 않는다.
+UNIQUE(user_id, folder) — 한 담당자가 같은 대상에 대해 설정을 둘 이상 두지 않는다.
 
 dev = SQLite, prod = Postgres.
 """
@@ -41,9 +41,9 @@ def parse_recipients(raw) -> list[str]:
 class MonitorTarget:
     id: str
     user_id: str                     # 담당 변호사
-    folder: str                      # bookmarks.folder 와 같은 값 = 고객사
+    folder: str                      # bookmarks.folder 와 같은 값 = 대상
     recipients: str                  # 쉼표 구분 이메일
-    label: Optional[str] = None      # 고객사 표시명 (없으면 folder)
+    label: Optional[str] = None      # 대상 표시명 (없으면 folder)
     cadence: str = "weekly"          # weekly | monthly
     send_weekday: int = 0            # 0=월 … 6=일 (weekly 전용)
     send_hour: int = 9               # KST

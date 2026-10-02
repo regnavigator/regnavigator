@@ -70,7 +70,14 @@ import { randomUUID } from "@/lib/utils";
 async function fetchThreadValues(
   threadId: string,
   signal?: AbortSignal,
-): Promise<{ messages: Message[]; files: Record<string, FileEntry>; steps: Step[] }> {
+): Promise<{
+  messages: Message[];
+  files: Record<string, FileEntry>;
+  steps: Step[];
+  confidential_seen?: boolean;
+  kind?: string;
+  workflow?: { steps: string[]; cursor: number } | null;
+}> {
   if (isDummyMode()) {
     return { messages: [], files: {}, steps: [] }; // 더미는 누적 state 없음(기존 동작)
   }
@@ -88,8 +95,17 @@ async function fetchThreadValues(
     // report_overview 등 특수 태그 — 전용 턴 렌더(재설계 2026-07-24).
     ...(m.kind ? { kind: m.kind } : {}),
     ...(m.report_id ? { report_id: m.report_id } : {}),
+    // 조합 중간 단계(2026-10-02) — 빠뜨리면 새로고침 후 숨김이 풀려
+    // 단계 답변이 전부 쏟아진다(실측).
+    ...(m.hidden ? { hidden: true } : {}),
   }));
-  return { messages, files: {}, steps: res.steps ?? [] };
+  return {
+    messages, files: {}, steps: res.steps ?? [],
+    confidential_seen: !!res.confidential_seen,
+    kind: res.kind,
+    // 진행 중인 기능 조합(2026-10-02) — 새로고침해도 단계가 살아야 한다.
+    workflow: res.workflow ?? null,
+  };
 }
 
 const REPORT_POLL_INTERVAL_MS = 5_000;
@@ -143,6 +159,12 @@ export function useChatState(
       reuseId?: string;
       attachments?: ChatAttachmentPayload[];
       skillHint?: string | null;
+      /** 조합 중간 단계 — 채팅에 렌더하지 않는다 */
+      hidden?: boolean;
+      /** 단계별 기밀 — 주면 전역 토글 대신 이 값 */
+      confidential?: boolean;
+      /** 조합 첨부 — 서버가 본문을 꺼내 합친다(텍스트를 다시 올리지 않는다) */
+      workflowFileIds?: string[];
     },
   ) => Promise<void>;
   /** 보고서 트리거(next_steps `kind:"report"` 클릭) — `POST /reports` + 폴링. */
@@ -199,6 +221,9 @@ export function useChatState(
         localId: string;
         attachments?: ChatAttachmentPayload[];
         skillHint?: string | null;
+        hidden?: boolean;
+        confidential?: boolean;
+        workflowFileIds?: string[];
       }
     | { kind: "report"; prompt: string; idempotencyKey: string }
     | null
@@ -238,6 +263,10 @@ export function useChatState(
         // 서버가 빈/미존재 state 로 응답해 로컬을 덮어쓰는 현상 방지.
         setState((prev) => {
           const next = rebuildFromThreadState(values);
+          // 기밀 이력은 재구성 대상이 아니라 서버가 알려주는 값 — 따로 얹는다.
+          next.confidential_seen = values.confidential_seen ?? prev.confidential_seen;
+          next.kind = values.kind ?? prev.kind;
+          next.workflow = values.workflow ?? null;
           if (prev.turns.length > 0 && next.turns.length === 0) return prev;
           // race 보호 2(2026-09-02): 새로고침 복원 effect 가 먼저 넣은 진행
           // 보고서 필드(report_started_at 등)를 이력 재구성이 덮으면, 우측
@@ -311,10 +340,10 @@ export function useChatState(
       onError: (data: unknown) => {
         setState((prev) => applyError(prev, data));
       },
-      onMeta: (humanMessageId: string) => {
+      onMeta: (humanMessageId: string, hidden?: boolean) => {
         const localId = pendingLocalIdRef.current;
         if (!localId) return;
-        setState((prev) => applyMeta(prev, humanMessageId, localId));
+        setState((prev) => applyMeta(prev, humanMessageId, localId, !!hidden));
       },
       onToolProgress: (event: ToolProgressEvent) => {
         setState((prev) => applyToolProgress(prev, event));
@@ -335,6 +364,9 @@ export function useChatState(
         attachments?: ChatAttachmentPayload[];
         /** "irb_drb" — IRB/DRB 버튼 명시 진입(키워드 감지 실패 대비 이중 접근) */
         skillHint?: string | null;
+        hidden?: boolean;
+        confidential?: boolean;
+        workflowFileIds?: string[];
       },
     ) => {
       if (!threadId) return;
@@ -346,6 +378,9 @@ export function useChatState(
         localId,
         attachments: opts?.attachments,
         skillHint: opts?.skillHint ?? null,
+        hidden: opts?.hidden,
+        confidential: opts?.confidential,
+        workflowFileIds: opts?.workflowFileIds,
       };
       pendingLocalIdRef.current = localId;
       const isFirstForTitle =
@@ -385,6 +420,9 @@ export function useChatState(
             signal: ac.signal,
             attachments: opts?.attachments ?? null,
             skillHint: opts?.skillHint ?? null,
+        hidden: opts?.hidden,
+        confidential: opts?.confidential,
+        workflowFileIds: opts?.workflowFileIds,
           },
           handlers,
         );
@@ -620,9 +658,15 @@ export function useChatState(
         return rid;
       } catch (err) {
         console.debug("[document] from-form 실패", err);
-        toast.error("이 서식은 지금 열 수 없어요", {
+        // 2026-10-01: "다른 서식을 선택해 보세요" 는 틀린 안내였다. 본문 조회가
+        // 막혀 있으면(조문 본문 소스 미연결) **어떤 서식도** 열리지 않는다 —
+        // 사용자를 헛된 재시도로 돌리지 말고, 지금 되는 길(원본 내려받기)을 준다.
+        toast.error("지금은 서식을 열 수 없어요", {
           id: t,
-          description: "원본 링크나 본문을 가져오지 못했습니다. 다른 서식을 선택해 보세요.",
+          description:
+            "서식 본문을 가져오지 못했습니다(조문 본문 연결 필요). " +
+            "목록의 [원본]으로 관보 원본 파일을 내려받아 작성하실 수 있습니다.",
+          duration: 9000,
         });
       } finally {
         formCreatingRef.current = false;

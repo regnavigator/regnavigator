@@ -49,10 +49,13 @@ export async function apiFetch<T>(
   // 2) 실 backend 호출
   const base = baseUrl();
   if (!base) throw new Error("backend URL 미설정");
+  // FormData 는 Content-Type 을 **브라우저가** 정해야 한다 — 직접 박으면
+  // multipart 경계(boundary)가 빠져 서버가 본문을 못 읽는다(조합 파일 업로드).
+  const isForm = typeof FormData !== "undefined" && init.body instanceof FormData;
   const res = await fetch(`${base}${path}`, {
     ...init,
     headers: {
-      "Content-Type": "application/json",
+      ...(isForm ? {} : { "Content-Type": "application/json" }),
       ...authHeaders(),
       ...init.headers,
     },

@@ -1,4 +1,4 @@
-"""고객사별 규제 모니터링 리포트 — repo · 스케줄 · 수집/렌더 · 발송 게이트."""
+"""대상별 규제 모니터링 리포트 — repo · 스케줄 · 수집/렌더 · 발송 게이트."""
 
 from __future__ import annotations
 
@@ -127,8 +127,8 @@ def test_monthly_cadence_fires_on_first_of_month():
 
 def test_collect_scopes_to_folder(monkeypatch):
     bms = get_bookmarks_repo()
-    bms.create(_bookmark("uf", "고객사A", "001234_0001001", "2026-01-01"))
-    bms.create(_bookmark("uf", "고객사B", "005678_0002001", "2026-01-01"))
+    bms.create(_bookmark("uf", "대상A", "001234_0001001", "2026-01-01"))
+    bms.create(_bookmark("uf", "대상B", "005678_0002001", "2026-01-01"))
 
     seen = {}
 
@@ -137,8 +137,8 @@ def test_collect_scopes_to_folder(monkeypatch):
         return [], _OK
 
     monkeypatch.setattr(mr, "detect_amendments", fake_detect)
-    data = mr.collect(_target(user_id="uf", folder="고객사A"))
-    assert seen["n"] == 1, "다른 고객사 폴더의 북마크가 섞이면 안 된다"
+    data = mr.collect(_target(user_id="uf", folder="대상A"))
+    assert seen["n"] == 1, "다른 대상 폴더의 북마크가 섞이면 안 된다"
     assert data["watched"] == 1
 
 
@@ -241,7 +241,7 @@ def test_run_due_keeps_going_when_one_target_raises(monkeypatch):
 
     monkeypatch.setattr(mr, "send", selective)
     ids = {r["target_id"] for r in mr.run_due(datetime(2026, 10, 5, 12, 0, tzinfo=KST))}
-    assert good in ids, "한 고객사 실패가 나머지 발송을 막으면 안 된다"
+    assert good in ids, "한 대상 실패가 나머지 발송을 막으면 안 된다"
     assert bad not in ids
 
 
@@ -335,7 +335,7 @@ def test_send_emits_event(monkeypatch):
     assert mine, "발송 결과가 events 에 남아야 한다"
     payload = json.loads(mine[0].payload_json)
     assert payload["changes"] == 1 and payload["target_id"] == tid
-    assert "folder" not in payload, "고객사명은 이벤트에 남기지 않는다"
+    assert "folder" not in payload, "대상명은 이벤트에 남기지 않는다"
 
 
 def test_event_failure_does_not_break_send(monkeypatch):

@@ -9,7 +9,7 @@ medi-front 가 `@langchain/langgraph-sdk` 를 버리고 자체 SSE 로 갈아타
 | 하던 일 | 구경로 (langgraph SDK) | 신경로 |
 |---|---|---|
 | thread 생성 | `POST /threads` | 불요 — `POST /chat` 에 thread_id 생략 시 자동 생성(`meta` 이벤트로 수령) |
-| 채팅 스트리밍 | `POST /threads/{tid}/runs/stream` (`values`+`messages-tuple`+custom) | **`POST /chat`** (SSE, 이벤트 8종(+조건부 pii_notice) — §2) |
+| 채팅 스트리밍 | `POST /threads/{tid}/runs/stream` (`values`+`messages-tuple`+custom) | **`POST /chat`** (SSE, 이벤트 8종(+조건부 pii_notice·processing_mode) — §2) |
 | 대화 리로드 | `GET /threads/{tid}/state` → `values.messages/steps` | **`GET /chat/{tid}/state`** (§3) |
 | 사이드바 목록 | langgraph threads 검색 + `metadata.title` | **`GET /chat/threads`** (§3) |
 | 자동 제목 | `POST /threads/{tid}/auto-title` | **`POST /chat/{tid}/auto-title`** (응답 shape 동일) |
@@ -105,6 +105,16 @@ type ExtractResp = {
 {"type": "meta", "thread_id": "t_8a05270e812a...", "human_message_id": "msg_330d54962ede"}
 ```
 
+`hidden: true` 가 붙으면 **이 턴을 렌더하지 않는다**(2026-10-02). 기능 조합의 중간
+단계다 — 조합은 단계마다 답을 쏟지 않고 마지막에 한 번만 종합해 보여 준다. 숨김은
+렌더 계층의 일이고 모델 컨텍스트에는 그대로 들어가므로, 사용자가 "과정 보기"로
+펼쳐 볼 수 있어야 한다. `GET /chat/{tid}/state` 의 각 메시지에도 같은 뜻의
+`hidden: true` 가 실린다(새로고침 후에도 유지).
+
+```json
+{"type": "meta", "thread_id": "t_8a05...", "human_message_id": "msg_330d...", "hidden": true}
+```
+
 ### 2-1b. `pii_notice` — 입력 개인정보 자동 제거 고지 (선택 발생)
 
 입력에 개인정보(이름·주소·전화·주민번호 등)가 있어 `[이름]`/`[주소]` 등으로
@@ -138,6 +148,25 @@ body: { thread_id, term: "통합운영",           // 치환된 원래 단어(�
 
 서버는 신고와 무관하게 **마스킹된 모든 단어를 자동 수집**해 관리자가
 correct(정탐)/wrong(오탐) 라벨링한다 — admin: `GET/POST/DELETE /admin/pii-terms`.
+
+### 2-1c. `processing_mode` — 원내(온프레미스) 처리 고지 (선택 발생, 2026-10-01)
+
+이 턴이 **원내 모델**로 라우팅이 확정된 경우에만 `meta`·`pii_notice` 뒤, 첫
+`token` 앞에 1회 발생한다. 오지 않으면 상용 모델 + 웹 도구 경로다.
+
+```json
+{"type": "processing_mode", "thread_id": "t_8a05...", "local": true, "confidential": true, "web_search": false}
+```
+
+| 필드 | 의미 |
+|---|---|
+| `local` | 원내 모델에서 처리됨(상용 API 미사용) |
+| `confidential` | 사용자가 기밀 모드로 보낸 턴 |
+| `web_search` | 이 턴에 웹 검색 도구가 부여됐는가 — 로컬 라우팅 턴은 항상 `false` |
+
+입력창의 기밀 배너는 **클라이언트 설정값**을 보여 줄 뿐이라 실제 처리 경로를
+보증하지 못한다. 이 이벤트가 서버 측 확인이며, 프론트는 스레드당 1회 고지한다.
+라우팅이 실패하면 이 이벤트 대신 거부 안내가 `token` 으로 나간다(기밀 fail-closed).
 
 ### 2-2. `token` — 답변 텍스트 델타
 

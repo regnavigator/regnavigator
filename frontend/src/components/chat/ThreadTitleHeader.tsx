@@ -130,6 +130,20 @@ export function ThreadTitleHeader({
             title="제목 수정"
             className="group flex min-w-0 items-center gap-2 px-1 py-1 text-left"
           >
+            {/* 종류 배지(2026-10-02) — 열려 있는 스레드가 무엇인지 한눈에.
+                모드(AppMode)와 **다른 축**이다: 전문가 모드에서도 모니터링
+                대상을 열 수 있다. */}
+            {(thread?.kind ?? "chat") === "monitor" ? (
+              <span
+                data-testid="thread-kind-badge"
+                className="inline-flex shrink-0 items-center gap-1 rounded-pill bg-md-primary-container px-2 py-0.5 text-[10.5px] font-semibold text-md-on-primary-container"
+              >
+                <span className="material-symbols-outlined text-[12px]" aria-hidden>
+                  radar
+                </span>
+                모니터링 대상
+              </span>
+            ) : null}
             <span
               className="truncate text-[16px] font-bold text-md-on-surface"
               style={{ letterSpacing: "-0.015em" }}

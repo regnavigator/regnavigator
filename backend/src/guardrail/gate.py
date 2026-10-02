@@ -445,6 +445,11 @@ def _strict() -> bool:
     return (os.getenv("PII_GATE_STRICT") or "1").strip() != "0"
 
 
+def _allow_no_ner() -> bool:
+    """NER 미설정을 **명시적으로** 허용(dev 전용). 기본 0."""
+    return (os.getenv("PII_GATE_ALLOW_NO_NER") or "0").strip() == "1"
+
+
 def scrub_input(text: str,
                 collect: list | None = None) -> tuple[str, list[str]]:
     """입구 게이트 — regex 1차 + NER 2차. (치환 텍스트, 카테고리).
@@ -456,10 +461,23 @@ def scrub_input(text: str,
     """
     out, cats = _regex_scrub(text)
     if not ner_client.is_available():
-        # 서비스 미설정 = 이름·주소 방어선 없음. dev 는 이 상태가 정상이므로
-        # strict 여도 통과시키되(설정으로 끈 것), 운영은 /readyz 가 경고한다.
+        # 서비스 미설정 = 이름·주소 방어선 없음.
+        #
+        # 종전엔 여기서 조용히 통과했다("dev 는 이 상태가 정상"). 그 결과 **운영
+        # 에서 `PII_NER_API_KEY` 하나만 빠져도 fail-closed 가 fail-open 으로 뒤집
+        # 혔고**, `/readyz` 는 그걸 `ok` 로 보고했다(2026-10-02 감사). 설정 누락은
+        # 다운과 같은 "불완전 스캔"이다 — 같은 경로로 보낸다. dev 는 `PII_GATE_
+        # ALLOW_NO_NER=1` 로 명시적으로 끈다(묵시 통과 금지).
         out, intro_cats = _contextual_name_scrub(out, collect)
-        return out, cats + intro_cats
+        cats = cats + intro_cats
+        if _strict() and not _allow_no_ner():
+            _log.error(
+                "PII NER 미설정 — 이름·주소 검사 없이 통과할 수 없다(strict). "
+                "dev 라면 PII_GATE_ALLOW_NO_NER=1, 운영이라면 PII_NER_API_URL/KEY 를 설정.")
+            raise PiiScanIncomplete(
+                "개인정보 검사 서비스가 설정되지 않아 요청을 처리할 수 없습니다. "
+                "관리자에게 문의해 주세요.")
+        return out, cats
 
     spans, complete = ner_client.detect_spans(out)
     if spans:

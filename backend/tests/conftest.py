@@ -15,6 +15,9 @@ def _isolate_env(monkeypatch, tmp_path):
     monkeypatch.setenv("REPORTS_SQLITE_PATH", str(tmp_path / "test_reports.db"))
     # 서버측 동의 확인은 기본 끔 — 전용 테스트(test_privacy_rights)만 켠다.
     monkeypatch.setenv("CONSENT_ENFORCE", "0")
+    # NER 미설정은 이제 strict 게이트가 차단한다(2026-10-02). 테스트는 NER 없이
+    # 도는 게 정상이므로 dev 와 같은 방식으로 **명시적으로** 허용한다.
+    monkeypatch.setenv("PII_GATE_ALLOW_NO_NER", "1")
     for k in [
         # ⚠️ PG DSN 은 반드시 차단 — 어떤 경로로든 .env 가 프로세스에 실리면
         # (실측 2026-08-16: 테스트가 load_dotenv 최상단 스크립트를 import)
@@ -130,3 +133,14 @@ def _clear_retrieval_caches() -> None:
 
     _sc._client.cache_clear()
     _sc._search_cache.clear()
+
+
+@pytest.fixture(autouse=True)
+def _reset_aux_policy():
+    """보조 LLM 정책(contextvar)이 테스트 사이에 새지 않게(2026-10-03)."""
+    try:
+        from src import chat_loop as _cl
+        _cl._AUX_POLICY.set(None)
+    except Exception:  # noqa: BLE001 — 아직 import 못 하는 환경이면 무시
+        pass
+    yield

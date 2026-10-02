@@ -19,9 +19,11 @@ import {
 } from "react";
 
 import {
+  getConfidential,
   getMode,
   isAppMode,
   MODE_CHANGED_EVENT,
+  setConfidential,
   setMode as persistMode,
   styleForMode,
   type AppMode,
@@ -51,8 +53,13 @@ export function ModeProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    setModeState(getMode());
+    const m = getMode();
+    setModeState(m);
     setReady(true);
+    // 일반 경로에는 기밀 토글이 없다 — 전문가 경로에서 켠 채 모드를 바꾸면
+    // 보이지도 않는 설정이 계속 원내 라우팅을 강제하고, 원내 모델이 미설정이면
+    // 그 질문은 아예 거부된다(fail-closed). 끌 UI 가 없으니 여기서 정리한다.
+    if (m === "public" && getConfidential(null)) setConfidential(false, null);
   }, []);
 
   // 같은 탭(사이드바 전환) + 다른 탭(storage) 양쪽 동기화.
@@ -75,6 +82,7 @@ export function ModeProvider({ children }: { children: ReactNode }) {
   const setMode = useCallback((m: AppMode) => {
     persistMode(m);
     setModeState(m);
+    if (m === "public") setConfidential(false, null);   // 위 mount 훅과 같은 이유
   }, []);
 
   const value = useMemo<Ctx>(

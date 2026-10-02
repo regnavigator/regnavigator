@@ -18,6 +18,8 @@ import { parseCitationTokens, citationLabel } from "@/lib/parse/citation";
 import { useRightPanel } from "@/lib/store/rightPanel";
 import { CitationEvidenceTooltip } from "@/components/chat/CitationEvidenceTooltip";
 import { useCiteHighlight } from "@/components/chat/CiteHighlightContext";
+import { useIsWatched } from "@/lib/store/watchedCitations";
+import { articleKeyFromCitation } from "@/lib/client/article";
 
 type Props = {
   content: string;
@@ -319,6 +321,9 @@ function CitationChip({
   // false/미도착은 중립색. steps 이벤트로 늦게(답변 후 ~2s) 도착하는 전환이
   // transition-colors로 부드럽게 보임 (과한 애니메이션 X).
   const verified = citation.verified === true;
+  // 관찰 중인지(2026-10-02) — 모니터링 스레드에서만 참이 된다. 담았는지 보려고
+  // 인용을 하나씩 열어 보는 건 일이다(실사용 지적).
+  const watched = useIsWatched(articleKeyFromCitation(citation));
 
   // Style as a clean inline hyperlink that flows naturally within the text sentence,
   // similar to academic/legal web citations.
@@ -338,6 +343,9 @@ function CitationChip({
   } else if (status === "amended_pending") {
     title += " (곧 변경 예정)";
   }
+  if (watched) {
+    title += " · 관찰 중";
+  }
   if (verified) {
     title += " · 원문 대조 검증됨";
   } else {
@@ -356,7 +364,7 @@ function CitationChip({
         onBlur={() => setHovered(null)}
         data-cite-n={citation.number}
         title={title}
-        aria-label={`${label} 출처 [${citation.number}] ${citation.title}${status === "revoked" ? " (폐지)" : status === "amended_pending" ? " (개정 예정)" : ""}${verified ? " (원문 대조 검증됨)" : ""}`}
+        aria-label={`${label} 출처 [${citation.number}] ${citation.title}${status === "revoked" ? " (폐지)" : status === "amended_pending" ? " (개정 예정)" : ""}${watched ? " (관찰 중)" : ""}${verified ? " (원문 대조 검증됨)" : ""}`}
         className={`${cls} ${highlighted ? "ring-2 ring-md-primary/40" : ""}`}
       >
         {citation.number}
@@ -364,6 +372,16 @@ function CitationChip({
           <span
             aria-hidden
             className="absolute -right-[3px] -top-[3px] size-[7px] rounded-full bg-md-error ring-2 ring-md-surface"
+          />
+        ) : null}
+        {/* 관찰 중 — 개정예정 점(우상단)과 **다른 자리·다른 색**에 둔다.
+            둘이 겹치면 무엇이 무엇인지 알 수 없다. 왼쪽에 두면 앞 글자와 붙어
+            별개 기호처럼 읽혀서(2026-10-02 실측) 오른쪽 아래로 뺐다. */}
+        {watched ? (
+          <span
+            aria-hidden
+            data-watched="1"
+            className="absolute -bottom-[3px] -right-[3px] size-[7px] rounded-full bg-md-primary ring-2 ring-md-surface"
           />
         ) : null}
       </button>

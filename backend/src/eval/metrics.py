@@ -19,23 +19,37 @@ def recall_at_k(retrieved: list[str], relevant: Iterable[str], k: int) -> Option
     return len(topk & rel) / len(rel)
 
 
-def precision_at_k(retrieved: list[str], relevant: Iterable[str], k: int) -> float:
-    """상위 k 중 정답 비율."""
+def precision_at_k(retrieved: list[str], relevant: Iterable[str], k: int) -> Optional[float]:
+    """상위 k 중 정답 비율. 정답 라벨 없으면 None(정의 안 됨).
+
+    **라벨이 없는 질의를 0 으로 세면 안 된다**(2026-10-02). 평가셋 183 중 69
+    (37.7%)가 라벨 0건이라, 그걸 0점으로 분모에 넣으면 지표가 38% 과소보고되고
+    검색을 아무리 개선해도 **절대 올라가지 않는 바닥**이 생긴다 — 보고된
+    hit@3 0.54 는 라벨 있는 114 기준 ≈0.87 이었다. 그 바닥을 들고 튜닝하고
+    있었다. `recall_at_k` 는 처음부터 None 이었는데 이 둘만 0.0 이었다.
+    """
+    rel = set(relevant)
+    if not rel:
+        return None
     topk = retrieved[:k]
     if not topk:
         return 0.0
-    rel = set(relevant)
     return sum(1 for r in topk if r in rel) / len(topk)
 
 
-def hit_at_k(retrieved: list[str], relevant: Iterable[str], k: int) -> float:
-    """상위 k 에 정답이 하나라도 있으면 1.0."""
-    return 1.0 if set(retrieved[:k]) & set(relevant) else 0.0
-
-
-def reciprocal_rank(retrieved: list[str], relevant: Iterable[str]) -> float:
-    """첫 정답의 역순위(1/rank). 없으면 0."""
+def hit_at_k(retrieved: list[str], relevant: Iterable[str], k: int) -> Optional[float]:
+    """상위 k 에 정답이 하나라도 있으면 1.0. 정답 라벨 없으면 None."""
     rel = set(relevant)
+    if not rel:
+        return None
+    return 1.0 if set(retrieved[:k]) & rel else 0.0
+
+
+def reciprocal_rank(retrieved: list[str], relevant: Iterable[str]) -> Optional[float]:
+    """첫 정답의 역순위(1/rank). 없으면 0. 정답 라벨 없으면 None."""
+    rel = set(relevant)
+    if not rel:
+        return None
     for i, r in enumerate(retrieved, start=1):
         if r in rel:
             return 1.0 / i

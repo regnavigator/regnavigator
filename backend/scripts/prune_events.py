@@ -75,6 +75,8 @@ METRIC_TYPES = (
     # 식별자 대조 감사(2026-09-17) — payload 는 서식·별표 번호 라벨과 건수뿐
     # (법령 식별자 — 사용자 작성 내용 아님). 빈도 추이를 보존한다.
     "identifier_audit",
+    # 출처 적합성 필터 집계(2026-10-02) — 사유별 건수·제목 발췌. 내용 아님.
+    "source_filter",
     "feedback",           # 👍/👎 등급(코멘트는 user_feedback 쪽)
     "model_ab",
     # 사용자 요청 보고서 삭제(2026-08-27) — payload 는 kind 만. 삭제 빈도 관측용.

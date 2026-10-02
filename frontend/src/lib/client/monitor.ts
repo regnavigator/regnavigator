@@ -1,5 +1,5 @@
 /**
- * 고객사 규제 모니터링 클라이언트 — 배송 설정 CRUD · 미리보기 · 수동 발송.
+ * 규제 모니터링 클라이언트 — 배송 설정 CRUD · 미리보기 · 수동 발송.
  * 백엔드: /monitor/targets (user 스코프). 계약: backend routes/monitor.py.
  */
 

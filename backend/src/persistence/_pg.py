@@ -228,7 +228,10 @@ CREATE TABLE IF NOT EXISTS chat_threads (
   pinned            BOOLEAN NOT NULL DEFAULT FALSE
 );
 ALTER TABLE chat_threads ADD COLUMN IF NOT EXISTS title TEXT;
+ALTER TABLE chat_threads ADD COLUMN IF NOT EXISTS confidential_seen INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE chat_threads ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'chat';
 ALTER TABLE chat_threads ADD COLUMN IF NOT EXISTS pinned BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE chat_threads ADD COLUMN IF NOT EXISTS workflow_json TEXT;
 -- 사이드바 목록(list_for_user): user_id 필터 + pinned/updated_at 정렬 커버.
 CREATE INDEX IF NOT EXISTS idx_chat_threads_user
   ON chat_threads(user_id, pinned DESC, updated_at DESC);
@@ -244,6 +247,10 @@ CREATE TABLE IF NOT EXISTS chat_messages (
 -- relation does not exist 로 _DDL 배치 전체가 중단돼 아래 테이블(chat_steps·
 -- beta_whitelist·app_settings)까지 생성되지 않았다. 운영 DB 는 테이블이 이미
 -- 있어 IF NOT EXISTS 로 통과 — 재해복구·신규 리전에서만 터지는 상태였다(2026-08-04).
+-- 기밀 단계 격리(2026-10-02) — 비기밀 턴의 컨텍스트에서 뺄 기준.
+ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS sensitive BOOLEAN NOT NULL DEFAULT FALSE;
+-- 조합 중간 단계(2026-10-02) — 채팅에 렌더하지 않는다(컨텍스트에는 들어간다).
+ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS hidden BOOLEAN NOT NULL DEFAULT FALSE;
 CREATE INDEX IF NOT EXISTS idx_chat_messages_thread ON chat_messages(thread_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_messages_thread_seq
   ON chat_messages(thread_id, seq);
@@ -291,6 +298,49 @@ CREATE TABLE IF NOT EXISTS monitor_targets (
 );
 CREATE INDEX IF NOT EXISTS idx_monitor_targets_user
   ON monitor_targets(user_id, created_at DESC);
+
+-- 모니터링 스레드 재구성(2026-10-02) — docs/spec/monitor-threads-design.md
+CREATE TABLE IF NOT EXISTS monitor_watch (
+  id            TEXT PRIMARY KEY,
+  thread_id     TEXT NOT NULL,
+  article_key   TEXT NOT NULL,
+  citation_json TEXT NOT NULL,
+  added_by      TEXT NOT NULL DEFAULT 'user',
+  reason        TEXT,
+  added_at      TEXT NOT NULL,
+  removed_at    TEXT,
+  UNIQUE(thread_id, article_key)
+);
+CREATE INDEX IF NOT EXISTS idx_monitor_watch_thread
+  ON monitor_watch(thread_id, removed_at);
+
+CREATE TABLE IF NOT EXISTS monitor_alert (
+  id           TEXT PRIMARY KEY,
+  thread_id    TEXT NOT NULL,
+  article_key  TEXT NOT NULL,
+  kind         TEXT NOT NULL,
+  summary      TEXT NOT NULL,
+  payload_json TEXT NOT NULL DEFAULT '{}',
+  detected_at  TEXT NOT NULL,
+  read_at      TEXT,
+  dismissed_at TEXT,
+  UNIQUE(thread_id, article_key, kind, detected_at)
+);
+CREATE INDEX IF NOT EXISTS idx_monitor_alert_thread
+  ON monitor_alert(thread_id, detected_at DESC);
+
+CREATE TABLE IF NOT EXISTS contacts (
+  id           TEXT PRIMARY KEY,
+  user_id      TEXT NOT NULL,
+  email        TEXT NOT NULL,
+  name         TEXT,
+  org          TEXT,
+  last_used_at TEXT,
+  created_at   TEXT NOT NULL,
+  UNIQUE(user_id, email)
+);
+CREATE INDEX IF NOT EXISTS idx_contacts_user
+  ON contacts(user_id, last_used_at DESC);
 
 CREATE TABLE IF NOT EXISTS answer_reviews (
   id          TEXT PRIMARY KEY,

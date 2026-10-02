@@ -39,6 +39,21 @@ from .feedback_repo import (
     PostgresFeedbackRepo,
     SqliteFeedbackRepo,
 )
+from .contacts_repo import (
+    ContactsRepo,
+    PostgresContactsRepo,
+    SqliteContactsRepo,
+)
+from .monitor_alert_repo import (
+    MonitorAlertRepo,
+    PostgresMonitorAlertRepo,
+    SqliteMonitorAlertRepo,
+)
+from .monitor_watch_repo import (
+    MonitorWatchRepo,
+    PostgresMonitorWatchRepo,
+    SqliteMonitorWatchRepo,
+)
 from .monitor_targets_repo import (  # noqa: F401
     MonitorTarget, MonitorTargetsRepo, PostgresMonitorTargetsRepo,
     SqliteMonitorTargetsRepo, parse_recipients,
@@ -54,6 +69,12 @@ from .report_runs_repo import (
     ReportRun,
     ReportRunsRepo,
     SqliteReportRunsRepo,
+)
+from .workflow_files_repo import (
+    PostgresWorkflowFilesRepo,
+    SqliteWorkflowFilesRepo,
+    WorkflowFile,
+    WorkflowFilesRepo,
 )
 from .reports_repo import (
     PostgresReportsRepo,
@@ -149,6 +170,42 @@ def get_monitor_targets_repo() -> MonitorTargetsRepo:
         return PostgresMonitorTargetsRepo(dsn=os.environ["REPORTS_PG_DSN"])
     if _backend() == "sqlite":
         return SqliteMonitorTargetsRepo(path=_sqlite_path())
+    raise ValueError(f"Unknown REPORTS_BACKEND: {_backend()!r}")
+
+
+@lru_cache(maxsize=1)
+def get_monitor_watch_repo() -> MonitorWatchRepo:
+    if _backend() == "postgres":
+        return PostgresMonitorWatchRepo(dsn=os.environ["REPORTS_PG_DSN"])
+    if _backend() == "sqlite":
+        return SqliteMonitorWatchRepo(path=_sqlite_path())
+    raise ValueError(f"Unknown REPORTS_BACKEND: {_backend()!r}")
+
+
+@lru_cache(maxsize=1)
+def get_monitor_alert_repo() -> MonitorAlertRepo:
+    if _backend() == "postgres":
+        return PostgresMonitorAlertRepo(dsn=os.environ["REPORTS_PG_DSN"])
+    if _backend() == "sqlite":
+        return SqliteMonitorAlertRepo(path=_sqlite_path())
+    raise ValueError(f"Unknown REPORTS_BACKEND: {_backend()!r}")
+
+
+@lru_cache(maxsize=1)
+def get_contacts_repo() -> ContactsRepo:
+    if _backend() == "postgres":
+        return PostgresContactsRepo(dsn=os.environ["REPORTS_PG_DSN"])
+    if _backend() == "sqlite":
+        return SqliteContactsRepo(path=_sqlite_path())
+    raise ValueError(f"Unknown REPORTS_BACKEND: {_backend()!r}")
+
+
+@lru_cache(maxsize=1)
+def get_workflow_files_repo() -> WorkflowFilesRepo:
+    if _backend() == "postgres":
+        return PostgresWorkflowFilesRepo(dsn=os.environ["REPORTS_PG_DSN"])
+    if _backend() == "sqlite":
+        return SqliteWorkflowFilesRepo(path=_sqlite_path())
     raise ValueError(f"Unknown REPORTS_BACKEND: {_backend()!r}")
 
 

@@ -25,6 +25,26 @@ export function formDocKind(
   return "other";
 }
 
+/**
+ * 인용 하나의 성격 판정 (2026-10-01).
+ *
+ * `attachment_subtype` 은 검색 API 가 **알고 있는 값**이고, 제목 추측은 그것이
+ * 없을 때의 폴백이다. 종전엔 추측만 썼는데, `공중위생관리법 시행규칙 별표:
+ * 영업신고서` 처럼 **서식인데 제목에 '별표'만 있는** 경우가 흔해 기입 버튼이
+ * 뜨지 않았다(실사용 신고).
+ */
+export function formDocKindOf(c: {
+  attachment_subtype?: string | null;
+  article?: string | null;
+  title?: string | null;
+}): FormDocKind {
+  const sub = (c.attachment_subtype ?? "").trim();
+  // 실측 값: "서식" · "별표" · "별지"(행정규칙 별지 서식). "별지"도 기입 양식이다.
+  if (sub.includes("서식") || sub === "별지") return "form";
+  if (sub === "별표") return "annex";
+  return formDocKind(c.article, c.title);
+}
+
 /** (구 API 호환) 서식인가 — AnnexModal 의 다운로드 CTA 분기 등에서 사용. */
 export function isFormLike(...texts: (string | null | undefined)[]): boolean {
   return formDocKind(...texts) === "form";

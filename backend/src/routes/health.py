@@ -70,7 +70,12 @@ def _check_pii_ner():
     url = os.getenv("PII_NER_API_URL")
     key = os.getenv("PII_NER_API_KEY")
     if not url or not key:
-        return True, "PII NER 미설정(폴백 동작)"
+        # 미설정은 **down** 이다(2026-10-02). 종전 `ok` 로 보고해 키 누락이 운영
+        # 알림 어디에도 안 보였다 — 그 상태가 곧 PII 게이트가 열린 창이었다.
+        # dev 가 명시적으로 끈 경우(`PII_GATE_ALLOW_NO_NER=1`)만 ok.
+        if (os.getenv("PII_GATE_ALLOW_NO_NER") or "0").strip() == "1":
+            return True, "PII NER 미설정 — dev 명시 허용"
+        return False, "PII NER 미설정 — 이름·주소 검사 없음(게이트가 입력을 차단한다)"
     import httpx
 
     timeout = float((os.getenv("READYZ_PROBE_TIMEOUT_S") or "").strip() or "4")

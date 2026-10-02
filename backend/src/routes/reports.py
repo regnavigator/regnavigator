@@ -123,7 +123,18 @@ async def trigger_report(request: Request, body: dict):
     # 소유권 — 남의 thread 대화로 보고서 생성(=맥락 유출) 차단. 존재도 필수
     # (빈 thread 론 보고서 불가). 구경로 @auth.on.threads 스코프 대체.
     from src.routes.chat import _owned_meta_or_404
-    await asyncio.to_thread(_owned_meta_or_404, thread_id, request)
+    _meta = await asyncio.to_thread(_owned_meta_or_404, thread_id, request)
+
+    # 기밀 스레드 게이트(2026-10-03). 보고서 파이프라인은 직전 질문·답변·누적
+    # 인용을 decompose(Haiku)·writer 로 보내는데 `confidential` 을 전혀 몰랐다 —
+    # 변호사가 기밀 상담 뒤 "심층보고서"를 누르면 **의뢰인 사실관계가 통째로
+    # 상용 모델로** 나갔다. writer·decompose 가 원내로 고정될 때까지 막는다.
+    if bool((_meta or {}).get("confidential_seen")):
+        raise HTTPException(
+            status_code=422,
+            detail="기밀 모드로 상담한 대화는 심층보고서를 만들 수 없습니다 — "
+                   "보고서 생성은 원내 모델로 처리되지 않습니다. 의견서 초안(원내)을 "
+                   "이용하거나 새 대화에서 요청해 주세요.")
 
     # 진입 허들 — 실질 상담 맥락이 있어야만 5~12분 27B 잡을 띄운다. 없으면 즉시
     # 422(멱등락 acquire·잡 spawn 이전). 인사/서비스 소개만 오간 thread 에서 빈
@@ -965,3 +976,285 @@ def download_report(report_id: str, request: Request,
         media_type=f"{mime}{charset}",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+# ── 서면·의견서 초안 (2026-10-01) ────────────────────────────────────────────
+#
+# 서식(`/documents/from-form`)과 저장·패널·다운로드를 공유하고, **문단 단위 수정**만
+# 다르다. 자세한 설계 근거는 `src/brief.py` 머리말.
+
+@router.get("/documents/{report_id}/paragraphs")
+def list_document_paragraphs(report_id: str, request: Request):
+    """현재 본문의 문단 목록 — FE 와 서버가 **같은 쪼개기**를 쓰게 한다.
+
+    FE 가 자체적으로 나누면 두 쪽 인덱스가 어긋나 엉뚱한 문단을 고치게 된다.
+    """
+    meta = get_reports_repo().get(report_id)
+    if not meta:
+        raise HTTPException(status_code=404, detail="report not found")
+    assert_report_access(meta, request)
+
+    from src.brief import allowed_citations, split_paragraphs
+    from src.persistence import get_blob_store as _bs
+
+    try:
+        body = _bs().get(meta.blob_uri) if meta.blob_uri else ""
+    except Exception:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail="document body unavailable")
+    return {
+        "report_id": report_id,
+        "title": meta.title,
+        "paragraphs": split_paragraphs(body),
+        "citation_numbers": sorted(allowed_citations(body)),
+    }
+
+
+@router.post("/documents/{report_id}/revise")
+async def revise_document_paragraph(report_id: str, request: Request,
+                                    authorization: Optional[str] = Header(None)):
+    """문단 하나를 지시대로 고쳐 쓴다.
+
+    body: {"index": int, "original_text": str, "instruction": str,
+           "replacement": str(선택 — 있으면 LLM 없이 그대로 교체)}
+    반환: {"ok", "index", "before", "after", "dropped_citations", "paragraphs"}
+
+    `original_text` 가 그 자리의 현재 내용과 다르면 **409** — 조용히 다른 문단을
+    고치느니 거부하고 다시 읽게 한다(낙관적 동시성).
+    """
+    _check_auth(authorization)
+    meta = get_reports_repo().get(report_id)
+    if not meta:
+        raise HTTPException(status_code=404, detail="report not found")
+    assert_report_access(meta, request)
+
+    payload = await request.json()
+    try:
+        index = int(payload.get("index"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="index 가 필요합니다")
+    original_text = str(payload.get("original_text") or "")
+    instruction = str(payload.get("instruction") or "").strip()
+    manual = payload.get("replacement")
+    if not original_text:
+        raise HTTPException(status_code=422, detail="original_text 가 필요합니다")
+    if manual is None and not instruction:
+        raise HTTPException(status_code=422,
+                            detail="instruction 또는 replacement 가 필요합니다")
+
+    from src.brief import (ReviseConflict, generate_revision, revise_paragraph,
+                           split_paragraphs)
+    from src.persistence import get_blob_store as _bs
+
+    try:
+        body = _bs().get(meta.blob_uri) if meta.blob_uri else ""
+    except Exception:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail="document body unavailable")
+
+    if manual is not None:
+        replacement = str(manual)
+    else:
+        # 서면에는 사건 사실관계가 들어간다 — 서식 기입과 같은 레인을 쓴다.
+        from src.doc_fill import onprem_configured, onprem_fill
+
+        if not onprem_fill():
+            raise HTTPException(
+                status_code=503,
+                detail=("원내 작성 모델에 연결할 수 없습니다. 문단을 직접 수정해 주세요."
+                        if onprem_configured() else
+                        "원내 작성 모델이 설정되어 있지 않습니다. 문단을 직접 수정해 주세요."),
+            )
+        replacement = await generate_revision(
+            document=body, paragraph=original_text, instruction=instruction)
+        if not replacement:
+            raise HTTPException(status_code=422,
+                                detail="이 지시로는 문단을 고치지 못했습니다.")
+
+    try:
+        new_body, dropped = revise_paragraph(
+            body, index=index, original_text=original_text,
+            replacement=replacement)
+    except ReviseConflict as e:
+        raise HTTPException(status_code=409, detail={
+            "message": str(e), "current": e.current})
+
+    await asyncio.to_thread(_bs().put, f"{report_id}.md", new_body)
+    _log.info("brief revise: %s 문단 %d (인용 제거 %d건)",
+              report_id, index, len(dropped))
+    return {
+        "ok": True,
+        "index": index,
+        "before": original_text,
+        "after": replacement,
+        "dropped_citations": dropped,
+        "paragraphs": split_paragraphs(new_body),
+    }
+
+
+@router.post("/documents/from-brief")
+async def create_document_from_brief(request: Request,
+                                     authorization: Optional[str] = Header(None)):
+    """채팅 대화에서 **서면·의견서 초안**을 만든다 (2026-10-01).
+
+    body: {"thread_id": str, "title": str(선택)}
+    반환: {"report_id", "title", "paragraphs", "citation_numbers"}
+
+    서식(`/documents/from-form`)과 달리 **조문 본문을 받아 오지 않는다** — 근거는
+    이미 대화의 인용에 있다. 그래서 openlaw PG·`/articles/bodies` 가 없어도 동작한다.
+
+    초안 본문은 골격 + 대화에서 모은 인용 목록까지만 만든다. 섹션 내용은 사용자가
+    문단 수정(`/documents/{id}/revise`)으로 채운다 — 처음부터 LLM 에 통째로
+    쓰게 하면 근거 없는 사실관계를 지어내고, 변호사는 그걸 지우는 데 더 오래 걸린다.
+    """
+    _check_auth(authorization)
+    payload = await request.json()
+    thread_id = str(payload.get("thread_id") or "").strip()
+    if not thread_id:
+        raise HTTPException(status_code=422, detail="thread_id 가 필요합니다")
+
+    from src.brief import (allowed_citations, compose_from_thread,
+                           skeleton, split_paragraphs)
+    from src.persistence import get_report_runs_repo
+    from src.persistence.reports_repo import ReportMeta
+    from src.persistence.threads_repo import get_threads_repo
+
+    meta_t = await asyncio.to_thread(get_threads_repo().get_meta, thread_id)
+    if not meta_t:
+        raise HTTPException(status_code=404, detail="thread not found")
+    owner = str(meta_t.get("user_id") or "")
+    me = str(getattr(request.state, "user_id", "") or "")
+    # 거부 기본값(2026-10-03): owner 나 me 가 없으면 **거부**. 종전 AND 조건은
+    # 셋 중 하나만 비어도 통과였다.
+    if not owner or not me or owner != me:
+        raise HTTPException(status_code=403, detail="forbidden")
+
+    title = (str(payload.get("title") or "").strip()
+             or f"{meta_t.get('title') or '상담'} 의견서")
+
+    # 대화가 모은 인용 — 번호를 그대로 이어 써야 본문의 [n] 과 맞는다.
+    state = await asyncio.to_thread(get_threads_repo().get_state, thread_id)
+    cites: list[dict] = []
+    seen_no: set[int] = set()
+    for st in (state.steps or []):
+        for c in (st.get("citations") or []):
+            n = c.get("number")
+            if not isinstance(n, int) or n in seen_no:
+                continue
+            seen_no.add(n)
+            cites.append(c)
+    cites.sort(key=lambda c: c.get("number") or 0)
+
+    # 대화와 인용으로 **채워진** 초안을 만든다(2026-10-02). 종전엔 골격만 줬는데
+    # "그냥 서식만 나온다"는 지적을 받았다 — 맞다. 재료는 이미 이 스레드에 있다.
+    if state.messages:
+        body = compose_from_thread(state.messages, cites, title=title)
+    else:
+        body = skeleton(title)
+
+    report_id = f"doc_{uuid.uuid4().hex[:16]}"
+    blob_uri = await asyncio.to_thread(
+        get_blob_store().put, f"{report_id}.md", body)
+    await asyncio.to_thread(get_reports_repo().create, ReportMeta(
+        id=report_id, thread_id=thread_id, mode="deep", kind="doc",
+        status="done", blob_uri=blob_uri, title=title,
+        summary="서면·의견서 초안",
+        citations_json=json.dumps(cites, ensure_ascii=False),
+        completed_at=None, filled_values="{}",
+    ))
+    runs = get_report_runs_repo()
+    idem = f"rpt_brief_{report_id}"
+    await asyncio.to_thread(
+        lambda: runs.acquire(idempotency_key=idem, thread_id=thread_id,
+                             user_id=me, prompt=f"[서면] {title}",
+                             purpose="document_draft"))
+    await asyncio.to_thread(
+        lambda: runs.finish(idem, status="completed", report_id=report_id))
+    _log.info("from-brief: 초안 생성 %s (%s, 인용 %d건)",
+              report_id, title[:30], len(cites))
+    return {
+        "report_id": report_id,
+        "title": title,
+        "paragraphs": split_paragraphs(body),
+        "citation_numbers": sorted(allowed_citations(body)),
+    }
+
+
+@router.post("/documents/{report_id}/polish")
+async def polish_document(report_id: str, request: Request,
+                          authorization: Optional[str] = Header(None)):
+    """초안을 **보고서체로 다듬는다** (2026-10-02).
+
+    body: {"sections": ["사실관계", ...]}(선택 — 미지정이면 전 절)
+    반환: {"ok", "polished": [절 이름], "skipped": [...], "dropped_citations": [n],
+           "paragraphs": [...]}
+
+    다듬기는 **쓰기가 아니다** — 주어진 절의 내용을 논리 순서로 재배열하고
+    격식체로 고칠 뿐이다. 새 인용 번호는 기계적으로 제거하고 알린다.
+    실패한 절은 원문을 그대로 둔다(부분 성공을 허용) — 전부 아니면 전무로 하면
+    긴 문서에서 한 절만 실패해도 아무것도 못 얻는다.
+    """
+    _check_auth(authorization)
+    meta = get_reports_repo().get(report_id)
+    if not meta:
+        raise HTTPException(status_code=404, detail="report not found")
+    assert_report_access(meta, request)
+
+    from src.brief import (allowed_citations, join_sections, polish_section,
+                           split_paragraphs, split_sections)
+    from src.doc_fill import onprem_configured, onprem_fill
+    from src.persistence import get_blob_store as _bs
+
+    payload = await request.json() if await request.body() else {}
+    want = {str(x) for x in (payload.get("sections") or [])}
+
+    try:
+        body = _bs().get(meta.blob_uri) if meta.blob_uri else ""
+    except Exception:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail="document body unavailable")
+    if not body.strip():
+        raise HTTPException(status_code=422, detail="본문이 비어 있습니다")
+
+    # 서면에는 사건 사실관계가 들어간다 — 서식 기입과 같은 레인을 쓴다.
+    if not onprem_fill():
+        raise HTTPException(
+            status_code=503,
+            detail=("원내 작성 모델에 연결할 수 없습니다. 문단을 직접 수정해 주세요."
+                    if onprem_configured() else
+                    "원내 작성 모델이 설정되어 있지 않습니다. 문단을 직접 수정해 주세요."),
+        )
+
+    allowed = allowed_citations(body)
+    sections = split_sections(body)
+    out: list[tuple[str, str]] = []
+    polished: list[str] = []
+    skipped: list[str] = []
+    dropped_all: list[int] = []
+
+    for title, content in sections:
+        if not title or (want and title not in want):
+            out.append((title, content))
+            continue
+        res = await polish_section(title, content, allowed=allowed)
+        if res is None:
+            skipped.append(title)
+            out.append((title, content))
+            continue
+        text, dropped = res
+        polished.append(title)
+        dropped_all.extend(n for n in dropped if n not in dropped_all)
+        out.append((title, text))
+
+    if not polished:
+        raise HTTPException(status_code=422,
+                            detail="다듬을 수 있는 절이 없었습니다.")
+
+    new_body = join_sections(out)
+    await asyncio.to_thread(_bs().put, f"{report_id}.md", new_body)
+    _log.info("brief polish: %s %d개 절 (스킵 %d, 인용 제거 %d)",
+              report_id, len(polished), len(skipped), len(dropped_all))
+    return {
+        "ok": True,
+        "polished": polished,
+        "skipped": skipped,
+        "dropped_citations": dropped_all,
+        "paragraphs": split_paragraphs(new_body),
+    }

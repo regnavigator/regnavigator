@@ -9,7 +9,7 @@
  * `parseNextStepsMarker`가 본문에서 마커 strip + items 추출.
  */
 
-import { useMemo } from "react";
+import { useMemo, type ReactNode } from "react";
 import { UserMessage } from "@/components/chat/UserMessage";
 import { StepCarousel } from "@/components/chat/StepCarousel";
 import { LiveSearchGlass } from "@/components/chat/LiveSearchGlass";
@@ -26,6 +26,11 @@ type Props = {
   turn: TurnType;
   /** `kind:"chat"` 후속 질문 카드 클릭 시 — host가 ChatInput prefill 결정 */
   onPickNextStep?: (prompt: string) => void;
+  /**
+   * 기능 조합 카드(2026-10-02) — 마지막 턴에만 호스트가 채운다. Turn 이 조합
+   * 상태를 알 필요는 없고, 자리만 내준다.
+   */
+  workflowSlot?: ReactNode;
   /** `kind:"report"` 후속 질문 클릭 시 — host가 report-mode dispatch */
   onTriggerReport?: (prompt: string, purpose?: string) => void;
   /** clarify/approve_action 인터럽트 응답 — useChatState.resume 연결 */
@@ -63,6 +68,7 @@ type Props = {
 export function Turn({
   turn,
   onPickNextStep,
+  workflowSlot,
   onTriggerReport,
   onResume,
   onUseAsForm,
@@ -307,6 +313,7 @@ export function Turn({
               question={turn.user_message.content}
               answer={cleanedAnswer!.content}
               citations={cleanedAnswer!.citations}
+              poolCitations={turn.steps.flatMap((st) => st.citations ?? [])}
               onUseAsForm={onUseAsForm}
             />
           ) : null}
@@ -370,6 +377,8 @@ export function Turn({
           onTriggerReport={onTriggerReport}
         />
       ) : null}
+
+      {workflowSlot}
     </article>
   );
 }

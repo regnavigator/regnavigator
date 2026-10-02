@@ -205,3 +205,87 @@ export async function downloadOriginalForm(reportId: string): Promise<string> {
   }
   return ext;
 }
+
+// ── 서면·의견서 초안 (2026-10-01) ────────────────────────────────────────────
+
+export type BriefParagraph = {
+  index: number;
+  text: string;
+  kind: "heading" | "paragraph";
+};
+
+export type BriefDoc = {
+  report_id: string;
+  title: string;
+  paragraphs: BriefParagraph[];
+  citation_numbers: number[];
+};
+
+/** 대화에서 서면 초안을 만든다. 조문 본문 소스가 없어도 동작한다. */
+export function createBrief(threadId: string, title?: string): Promise<BriefDoc> {
+  return apiFetch<BriefDoc>("/documents/from-brief", {
+    method: "POST",
+    body: JSON.stringify({ thread_id: threadId, title }),
+  });
+}
+
+/** 현재 문단 목록 — 서버와 같은 쪼개기를 쓰려고 매번 서버에서 받는다. */
+export function getBriefParagraphs(reportId: string): Promise<BriefDoc> {
+  return apiFetch<BriefDoc>(
+    `/documents/${encodeURIComponent(reportId)}/paragraphs`,
+  );
+}
+
+export type ReviseResult = {
+  ok: boolean;
+  index: number;
+  before: string;
+  after: string;
+  /** 문서에 없는 번호라 제거된 인용 — 사용자에게 알려야 한다 */
+  dropped_citations: number[];
+  paragraphs: BriefParagraph[];
+};
+
+/**
+ * 문단 하나를 고친다.
+ *
+ * `instruction` = AI 에게 시키는 지시, `replacement` = 사용자가 직접 친 문장.
+ * 후자는 원내 모델이 없어도 통과한다. `original_text` 는 낙관적 동시성 토큰이라
+ * **반드시** 지금 화면에 보이는 그 텍스트여야 한다 — 어긋나면 409.
+ */
+export function reviseBriefParagraph(
+  reportId: string,
+  body: {
+    index: number;
+    original_text: string;
+    instruction?: string;
+    replacement?: string;
+  },
+): Promise<ReviseResult> {
+  return apiFetch<ReviseResult>(
+    `/documents/${encodeURIComponent(reportId)}/revise`,
+    { method: "POST", body: JSON.stringify(body) },
+  );
+}
+
+export type PolishResult = {
+  ok: boolean;
+  polished: string[];
+  skipped: string[];
+  dropped_citations: number[];
+  paragraphs: BriefParagraph[];
+};
+
+/**
+ * 초안을 보고서체로 다듬는다. **쓰기가 아니라 고쳐 쓰기** — 주어진 내용을
+ * 논리 순서로 재배열하고 격식체로 바꿀 뿐이고, 새 인용 번호는 서버가 제거한다.
+ */
+export function polishBrief(
+  reportId: string,
+  sections?: string[],
+): Promise<PolishResult> {
+  return apiFetch<PolishResult>(
+    `/documents/${encodeURIComponent(reportId)}/polish`,
+    { method: "POST", body: JSON.stringify({ sections: sections ?? [] }) },
+  );
+}

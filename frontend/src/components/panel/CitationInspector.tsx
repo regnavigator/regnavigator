@@ -21,7 +21,12 @@ import { useRightPanel } from "@/lib/store/rightPanel";
 import { extractAnnexNum } from "@/lib/client/annex";
 import { articleKeyFromCitation, getArticle, type Article } from "@/lib/client/article";
 import { AnnexModal } from "@/components/chat/AnnexModal";
-import { formActionHint, formActionLabel, formDocKind, isFormLike } from "@/lib/formEntry";
+import {
+  formActionHint,
+  formActionLabel,
+  formDocKindOf,
+  isFormLike,
+} from "@/lib/formEntry";
 import { BookmarkButton } from "@/components/chat/BookmarkButton";
 import { MarkdownContent, preprocessLawText } from "@/components/chat/MarkdownContent";
 
@@ -230,6 +235,15 @@ type Props = {
   onSelectCitation?: (citationId: string) => void;
   /** 별표·서식을 골라 그 형식으로 서류 작성 요청(2026-08-26). 미지정=버튼 숨김 */
   onUseAsForm?: (articleKey: string, title: string) => void;
+  /**
+   * 모니터링 스레드일 때만 전달된다(2026-10-02). 인용을 펼친 자리에서 바로
+   * 관찰 목록에 담을 수 있어야 한다 — 패널을 따로 열러 가지 않도록.
+   */
+  watch?: {
+    has: (articleKey: string) => boolean;
+    add: (c: Citation) => void;
+    remove: (articleKey: string) => void;
+  };
 };
 
 function findCitation(state: ChatState, id: string): Citation | null {
@@ -284,6 +298,7 @@ export function CitationInspector({
   hideHeader = false,
   onSelectCitation,
   onUseAsForm,
+  watch,
 }: Props) {
   const { setCitation, setDocPath, setOpen: setRpOpen } = useRightPanel();
   /**
@@ -855,24 +870,56 @@ export function CitationInspector({
                 HWP 다운로드
               </a>
             ) : null}
+            {/* 관찰 목록 담기/빼기(2026-10-02) — 모니터링 스레드에서만.
+                조문 키가 있는 인용만(웹 자료는 개정을 추적할 수 없다). */}
+            {watch && articleKeyFromCitation(c) ? (
+              (() => {
+                const ak = articleKeyFromCitation(c)!;
+                const on = watch.has(ak);
+                return (
+                  <button
+                    type="button"
+                    data-testid="citation-watch"
+                    data-watching={on ? "1" : "0"}
+                    onClick={() => (on ? watch.remove(ak) : watch.add(c))}
+                    title={
+                      on
+                        ? "관찰 목록에서 뺍니다"
+                        : "이 조문의 개정·폐지를 추적합니다"
+                    }
+                    className={
+                      "inline-flex h-9 items-center gap-1.5 rounded-full px-3.5 text-[12.5px] font-semibold transition-colors " +
+                      (on
+                        ? "bg-md-primary-container text-md-on-primary-container hover:opacity-85"
+                        : "border border-md-outline-variant text-md-on-surface-variant hover:border-md-primary hover:text-md-primary")
+                    }
+                  >
+                    <span className="material-symbols-outlined text-[16px]" aria-hidden>
+                      {on ? "visibility" : "visibility_off"}
+                    </span>
+                    {on ? "관찰 중" : "관찰"}
+                  </button>
+                );
+              })()
+            ) : null}
             {/* 검색해서 확인한 그 서식으로 작성 — 보고서가 자체 검색으로 다른
                 서식을 집는 것을 막는다(2026-08-26). 별표·서식 인용에만 노출. */}
             {/* 2026-09-08: 별표(기준표)는 기입 항목이 없는 게 대부분이라 직접 [작성]을
                 두지 않는다 — 미리보기 모달이 기입 가능 여부를 판정해 버튼을 낸다. */}
             {onUseAsForm && ANNEX_CATEGORIES.has(c.doc_category ?? "") &&
-             articleKeyFromCitation(c) && formDocKind(c.article, c.title) === "form" ? (
+             articleKeyFromCitation(c) && formDocKindOf(c) === "form" ? (
               <button
                 type="button"
                 onClick={() =>
                   onUseAsForm(articleKeyFromCitation(c)!, c.title ?? "")
                 }
-                title={formActionHint(formDocKind(c.article, c.title))}
+                title={formActionHint(formDocKindOf(c))}
                 className="inline-flex h-9 items-center gap-1.5 rounded-full bg-md-primary px-4 text-[12.5px] font-semibold text-md-on-primary transition-colors hover:opacity-90"
               >
                 <span className="material-symbols-outlined text-[16px]" aria-hidden>
                   edit_document
                 </span>
-                {formActionLabel(formDocKind(c.article, c.title))}
+                {formActionLabel(formDocKindOf(c))}
               </button>
             ) : null}
             {url ? (
@@ -964,6 +1011,26 @@ export function CitationInspector({
                 {/* compact — 좁은 우측 패널에서 조문·별표 원문 가독성(폰트·행간 축소) */}
                 <MarkdownContent content={article.full_text} compact />
               </div>
+            </>
+          ) : c.snippet ? (
+            /* 조 본문 fetch 실패 — 하지만 **답변의 근거가 된 그 발췌는 이미 갖고
+               있다**(검색 API 가 준 chunk). 종전엔 그걸 버리고 실패 문구만 띄워
+               "근거를 눌러도 아무것도 안 보인다"가 됐다(실사용 신고 2026-10-01).
+               전문이 아님을 명시하고 발췌를 보여 주는 쪽이 낫다. */
+            <>
+              <hr className="my-4 border-md-outline-variant" />
+              <p className="mb-1.5 flex items-start gap-1 text-[11.5px] font-medium leading-[1.6] text-md-on-surface-variant">
+                <span className="material-symbols-outlined mt-[1px] text-[13px]" aria-hidden>
+                  info
+                </span>
+                <span>
+                  조문 전문을 불러오지 못해 <b>답변의 근거가 된 발췌</b>만 보여 드립니다.
+                  전문은 위 “법령정보센터에서 보기”에서 확인하세요.
+                </span>
+              </p>
+              <blockquote className="whitespace-pre-wrap border-l-2 border-md-secondary-fixed pl-3 text-body-base leading-[1.7] text-md-on-surface">
+                {c.snippet}
+              </blockquote>
             </>
           ) : (
             <>

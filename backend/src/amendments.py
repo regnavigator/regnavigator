@@ -1,6 +1,6 @@
 """북마크 개정 감지 — 저장 시점 대비 폐지·개정예정·시행일 변경 판정.
 
-`GET /bookmarks/amendments`(개인 조회)와 고객사별 정기 리포트(`monitor_report`)가
+`GET /bookmarks/amendments`(개인 조회)와 대상별 정기 리포트(`monitor_report`)가
 **같은 판정**을 써야 하므로 라우터에서 분리했다(2026-10-01).
 
 판정 2축:
@@ -59,7 +59,7 @@ def detect_with_status(bookmarks: Iterable) -> tuple[list[dict], dict]:
     """`detect` + **조회 완전성**.
 
     두 축 중 하나라도 실패하면 "변경 없음"과 "확인 못 함"을 구분할 수 없다 —
-    고객사 리포트가 DB 다운 중에 '변경 없음'이라고 단언하면 안 되므로
+    대상 리포트가 DB 다운 중에 '변경 없음'이라고 단언하면 안 되므로
     상태를 함께 돌려준다(2026-10-01).
 
     status: {checked, amendment_status_ok, articles_ok, complete}

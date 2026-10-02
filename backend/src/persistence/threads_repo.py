@@ -72,6 +72,12 @@ class ThreadState:
     seqs: list[int] = None  # type: ignore[assignment]
     summary_text: Optional[str] = None
     summary_upto_seq: Optional[int] = None
+    #: `messages` 와 병렬 — 기밀 턴에서 나온 메시지인가. 비기밀 턴의 컨텍스트에서
+    #: 뺄 때 쓴다. 과거 데이터는 전부 False(기밀 기능 도입 전).
+    sensitive: list[bool] = None  # type: ignore[assignment]
+    #: `messages` 와 병렬 — 조합의 중간 단계라 채팅에 렌더하지 않는 메시지인가.
+    #: 모델 컨텍스트에는 **그대로 들어간다**(숨김은 렌더 계층의 일이다).
+    hidden: list[bool] = None  # type: ignore[assignment]
 
     def as_tool_state(self) -> dict:
         """도구 코어(_count_tool_calls·step_start·번호매김)가 기대하는 state dict."""
@@ -80,6 +86,54 @@ class ThreadState:
             "steps": self.steps,
             "selected_law_keys": self.selected_law_keys,
         }
+
+
+# ── 기밀 메시지 at-rest 암호화 (2026-10-03) ─────────────────────────────────
+#
+# 감사: 서식 한 칸(`filled_values`)은 암호화하면서 **사건 사실관계 전문**인
+# `chat_messages.data_json` 은 평문이었다. `sensitive=1` 행만 `field_crypto` 로
+# 감싼다 — 비기밀 행은 그대로(검색 LIKE·관리자 조회가 걸려 있다).
+#
+# 저장 형태: `{"enc": "<암호문>"}` — PG 의 JSONB 컬럼과 호환되고, 읽을 때 키로
+# 구분한다. 키가 없는 dev 는 `encrypt_text` 가 평문을 돌려주므로 그냥 dict 다.
+
+def _dump_message(m: BaseMessage, sensitive: bool) -> str:
+    raw = json.dumps(message_to_dict(m), ensure_ascii=False)
+    if not sensitive:
+        return raw
+    from . import field_crypto
+
+    enc = field_crypto.encrypt_text(raw)
+    if enc == raw:  # 키 없음(dev) — 평문 그대로
+        return raw
+    return json.dumps({"enc": enc})
+
+
+def _load_message(stored) -> dict:
+    """저장값(str 또는 PG dict) → langchain 메시지 dict. 암호문이면 복호."""
+    d = json.loads(stored) if isinstance(stored, str) else stored
+    if isinstance(d, dict) and set(d.keys()) == {"enc"}:
+        from . import field_crypto
+
+        return json.loads(field_crypto.decrypt_text(d["enc"]) or "{}")
+    return d
+
+
+def _loads_workflow(raw) -> Optional[dict]:
+    """저장된 조합 역직렬화 — 깨진 값은 조용히 None(기능만 꺼진다).
+
+    스키마 정규화는 `src.workflow` 가 단일 진실원이다. 구버전(문자열 배열)도
+    거기서 객체로 승격된다.
+    """
+    if not raw:
+        return None
+    from src.workflow import normalize
+
+    try:
+        return normalize(raw)
+    except Exception:
+        # 저장된 값이 상한을 넘더라도 읽기는 막지 않는다 — 조합만 안 보이면 된다.
+        return None
 
 
 class SqliteThreadsRepo(SqliteRepoBase):
@@ -116,6 +170,29 @@ class SqliteThreadsRepo(SqliteRepoBase):
             "ALTER TABLE chat_threads ADD COLUMN summary_upto_seq INTEGER",
             "ALTER TABLE chat_threads ADD COLUMN title TEXT",
             "ALTER TABLE chat_threads ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",
+            # 기밀 턴 이력(2026-10-01) — 한 번이라도 기밀로 처리된 스레드는 이후
+            # 기밀을 끌 때 경고한다. 저장된 이전 대화가 통째로 상용 모델로 가기
+            # 때문이다. 클라이언트만 믿으면 새로고침·다른 기기에서 뚫린다.
+            "ALTER TABLE chat_threads ADD COLUMN confidential_seen INTEGER NOT NULL DEFAULT 0",
+            # 스레드 종류(2026-10-02) — 'chat' | 'monitor'. 모니터링 대상 하나가
+            # 스레드 하나다(docs/spec/monitor-threads-design.md).
+            "ALTER TABLE chat_threads ADD COLUMN kind TEXT NOT NULL DEFAULT 'chat'",
+            # 기밀 단계 격리(2026-10-02) — 이 메시지가 기밀 턴에서 나왔는가.
+            #
+            # 없으면 **단계별 기밀이 거짓말이 된다**: 비기밀 턴은 요청 컨텍스트로
+            # 스레드 전체를 보내므로, 앞 기밀 단계 내용이 그대로 상용 모델로
+            # 나간다. 이 컬럼이 그 필터의 기준이다.
+            "ALTER TABLE chat_messages ADD COLUMN sensitive INTEGER NOT NULL DEFAULT 0",
+            # 조합의 중간 단계(2026-10-02) — 채팅에 **렌더하지 않는다**.
+            #
+            # 조합은 단계마다 답을 쏟지 않고 마지막에 한 번만 종합해 보여 준다.
+            # 단계를 숨은 턴으로 돌리면 검색 강제·인용 번호·기밀 라우팅을 그대로
+            # 쓰면서 화면만 깨끗해진다. 지우는 게 아니라 접는 것 — "과정 보기"로
+            # 펼쳐 볼 수 있다.
+            "ALTER TABLE chat_messages ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0",
+            # 기능 조합 워크플로(2026-10-02) — {"steps": [feature_id], "cursor": n}.
+            # 스레드에 둔다: 새로고침·다른 기기에서도 진행 중인 단계가 살아야 한다.
+            "ALTER TABLE chat_threads ADD COLUMN workflow_json TEXT",
             "CREATE INDEX IF NOT EXISTS idx_chat_threads_user "
             "ON chat_threads(user_id, pinned DESC, updated_at DESC)",
         ):
@@ -138,7 +215,9 @@ class SqliteThreadsRepo(SqliteRepoBase):
     def get_state(self, thread_id: str) -> ThreadState:
         with self._lock, self._conn() as c:
             rows = c.execute(
-                "SELECT seq, data_json FROM chat_messages WHERE thread_id = ? ORDER BY seq",
+                "SELECT seq, data_json, COALESCE(sensitive, 0) AS sensitive, "
+                "COALESCE(hidden, 0) AS hidden "
+                "FROM chat_messages WHERE thread_id = ? ORDER BY seq",
                 (thread_id,),
             ).fetchall()
             step_rows = c.execute(
@@ -151,7 +230,7 @@ class SqliteThreadsRepo(SqliteRepoBase):
                 "FROM chat_threads WHERE id = ?",
                 (thread_id,),
             ).fetchone()
-        messages = messages_from_dict([json.loads(r["data_json"]) for r in rows])
+        messages = messages_from_dict([_load_message(r["data_json"]) for r in rows])
         seqs = [int(r["seq"]) for r in rows]
         steps = [json.loads(r["data_json"]) for r in step_rows]
         selected: list[str] = []
@@ -165,6 +244,8 @@ class SqliteThreadsRepo(SqliteRepoBase):
             selected_law_keys=selected, seqs=seqs,
             summary_text=(t["summary_text"] if t else None),
             summary_upto_seq=(t["summary_upto_seq"] if t else None),
+            sensitive=[bool(r["sensitive"]) for r in rows],
+            hidden=[bool(r["hidden"]) for r in rows],
         )
 
     def set_summary(self, thread_id: str, text: str, upto_seq: int) -> None:
@@ -194,11 +275,43 @@ class SqliteThreadsRepo(SqliteRepoBase):
         """thread 메타 1건 — 소유자 검사·제목 표시용. 없으면 None."""
         with self._lock, self._conn() as c:
             row = c.execute(
-                "SELECT id, user_id, title, created_at, updated_at "
+                "SELECT id, user_id, title, created_at, updated_at, "
+                "COALESCE(confidential_seen, 0) AS confidential_seen, "
+                "COALESCE(kind, 'chat') AS kind "
                 "FROM chat_threads WHERE id = ?",
                 (thread_id,),
             ).fetchone()
         return dict(row) if row else None
+
+    def set_kind(self, thread_id: str, kind: str) -> None:
+        """스레드 종류 지정 — 'chat' | 'monitor' (2026-10-02)."""
+        with self._lock, self._conn() as c:
+            c.execute("UPDATE chat_threads SET kind = ? WHERE id = ?",
+                      (kind, thread_id))
+
+    def get_workflow(self, thread_id: str) -> Optional[dict]:
+        """진행 중인 기능 조합 — {"steps": [...], "cursor": n}. 없으면 None."""
+        with self._lock, self._conn() as c:
+            row = c.execute(
+                "SELECT workflow_json FROM chat_threads WHERE id = ?",
+                (thread_id,),
+            ).fetchone()
+        return _loads_workflow(row["workflow_json"] if row else None)
+
+    def set_workflow(self, thread_id: str, workflow: Optional[dict]) -> None:
+        """조합 진행 상태 저장. None 이면 비운다(조합 종료)."""
+        raw = json.dumps(workflow, ensure_ascii=False) if workflow else None
+        with self._lock, self._conn() as c:
+            c.execute("UPDATE chat_threads SET workflow_json = ? WHERE id = ?",
+                      (raw, thread_id))
+
+    def mark_confidential(self, thread_id: str) -> None:
+        """이 스레드에 기밀 턴이 있었음을 기록한다(되돌리지 않는다)."""
+        with self._lock, self._conn() as c:
+            c.execute(
+                "UPDATE chat_threads SET confidential_seen = 1 WHERE id = ?",
+                (thread_id,),
+            )
 
     def set_title(self, thread_id: str, title: str) -> None:
         with self._lock, self._conn() as c:
@@ -229,14 +342,14 @@ class SqliteThreadsRepo(SqliteRepoBase):
             if user_id is None:  # dev 무인증 — 전체(로컬 개발 편의)
                 rows = c.execute(
                     "SELECT id, user_id, title, created_at, updated_at, "
-                    "COALESCE(pinned, 0) AS pinned FROM chat_threads "
+                    "COALESCE(pinned, 0) AS pinned, COALESCE(kind, 'chat') AS kind FROM chat_threads "
                     "ORDER BY pinned DESC, updated_at DESC LIMIT ?",
                     (limit,),
                 ).fetchall()
             else:
                 rows = c.execute(
                     "SELECT id, user_id, title, created_at, updated_at, "
-                    "COALESCE(pinned, 0) AS pinned FROM chat_threads WHERE user_id = ? "
+                    "COALESCE(pinned, 0) AS pinned, COALESCE(kind, 'chat') AS kind FROM chat_threads WHERE user_id = ? "
                     "ORDER BY pinned DESC, updated_at DESC LIMIT ?",
                     (user_id, limit),
                 ).fetchall()
@@ -308,7 +421,8 @@ class SqliteThreadsRepo(SqliteRepoBase):
         like = f"%{query}%"
         base = (
             "SELECT DISTINCT t.id, t.user_id, t.title, t.created_at, t.updated_at, "
-            "COALESCE(t.pinned,0) AS pinned FROM chat_threads t "
+            "COALESCE(t.pinned,0) AS pinned, COALESCE(t.kind, 'chat') AS kind "
+            "FROM chat_threads t "
             "JOIN chat_messages m ON m.thread_id = t.id WHERE "
             "json_extract(m.data_json, '$.type') IN ('human','ai') "
             "AND json_extract(m.data_json, '$.data.content') LIKE ? AND "
@@ -350,7 +464,13 @@ class SqliteThreadsRepo(SqliteRepoBase):
         return out
 
     # ── messages ────────────────────────────────────────────────────
-    def append_messages(self, thread_id: str, messages: list[BaseMessage]) -> None:
+    def append_messages(self, thread_id: str, messages: list[BaseMessage],
+                        *, sensitive: bool = False, hidden: bool = False) -> None:
+        """메시지 적재.
+
+        `sensitive=True` 면 기밀 턴 산출(비기밀 턴 컨텍스트에서 빠진다),
+        `hidden=True` 면 조합의 중간 단계(채팅에 렌더하지 않는다).
+        """
         if not messages:
             return
         now = utcnow_iso()
@@ -363,14 +483,17 @@ class SqliteThreadsRepo(SqliteRepoBase):
             seq = int(row["mx"]) + 1
             for m in messages:
                 c.execute(
-                    "INSERT INTO chat_messages (id, thread_id, seq, data_json, created_at) "
-                    "VALUES (?, ?, ?, ?, ?)",
+                    "INSERT INTO chat_messages "
+                    "(id, thread_id, seq, data_json, created_at, sensitive, hidden) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (
                         getattr(m, "id", None) or new_id(),
                         thread_id,
                         seq,
-                        json.dumps(message_to_dict(m), ensure_ascii=False),
+                        _dump_message(m, sensitive),
                         now,
+                        1 if sensitive else 0,
+                        1 if hidden else 0,
                     ),
                 )
                 seq += 1
@@ -458,8 +581,9 @@ class PostgresThreadsRepo:
         from . import _pg
         with _pg.pg_cursor(self.dsn) as cur:
             cur.execute(
-                "SELECT seq, data_json FROM chat_messages "
-                "WHERE thread_id = %s ORDER BY seq",
+                "SELECT seq, data_json, COALESCE(sensitive, FALSE) AS sensitive, "
+                "COALESCE(hidden, FALSE) AS hidden "
+                "FROM chat_messages WHERE thread_id = %s ORDER BY seq",
                 (thread_id,),
             )
             rows = cur.fetchall()
@@ -476,7 +600,7 @@ class PostgresThreadsRepo:
             )
             t = cur.fetchone()
         # JSONB 는 psycopg 가 이미 파싱해 dict/list 로 반환.
-        messages = messages_from_dict([r["data_json"] for r in rows])
+        messages = messages_from_dict([_load_message(r["data_json"]) for r in rows])
         seqs = [int(r["seq"]) for r in rows]
         steps = [r["data_json"] for r in step_rows]
         selected = [k for k in ((t or {}).get("selected_law_keys") or []) if k]
@@ -485,6 +609,8 @@ class PostgresThreadsRepo:
             selected_law_keys=selected, seqs=seqs,
             summary_text=(t or {}).get("summary_text"),
             summary_upto_seq=(t or {}).get("summary_upto_seq"),
+            sensitive=[bool(r["sensitive"]) for r in rows],
+            hidden=[bool(r["hidden"]) for r in rows],
         )
 
     def set_selected_law_keys(
@@ -509,12 +635,47 @@ class PostgresThreadsRepo:
                 (text, int(upto_seq), thread_id),
             )
 
+    def set_kind(self, thread_id: str, kind: str) -> None:
+        """스레드 종류 지정 — 'chat' | 'monitor' (2026-10-02)."""
+        from . import _pg
+        with _pg.pg_cursor(self.dsn) as cur:
+            cur.execute("UPDATE chat_threads SET kind = %s WHERE id = %s",
+                        (kind, thread_id))
+
+    def get_workflow(self, thread_id: str) -> Optional[dict]:
+        """진행 중인 기능 조합 — {"steps": [...], "cursor": n}. 없으면 None."""
+        from . import _pg
+        with _pg.pg_cursor(self.dsn) as cur:
+            cur.execute("SELECT workflow_json FROM chat_threads WHERE id = %s",
+                        (thread_id,))
+            row = cur.fetchone()
+        return _loads_workflow(dict(row)["workflow_json"] if row else None)
+
+    def set_workflow(self, thread_id: str, workflow: Optional[dict]) -> None:
+        """조합 진행 상태 저장. None 이면 비운다(조합 종료)."""
+        from . import _pg
+        raw = json.dumps(workflow, ensure_ascii=False) if workflow else None
+        with _pg.pg_cursor(self.dsn) as cur:
+            cur.execute("UPDATE chat_threads SET workflow_json = %s WHERE id = %s",
+                        (raw, thread_id))
+
+    def mark_confidential(self, thread_id: str) -> None:
+        """이 스레드에 기밀 턴이 있었음을 기록한다(되돌리지 않는다)."""
+        from . import _pg
+        with _pg.pg_cursor(self.dsn) as cur:
+            cur.execute(
+                "UPDATE chat_threads SET confidential_seen = 1 WHERE id = %s",
+                (thread_id,),
+            )
+
     # ── FE 조회 (사이드바·리로드) ──────────────────────────────────
     def get_meta(self, thread_id: str) -> Optional[dict]:
         from . import _pg
         with _pg.pg_cursor(self.dsn) as cur:
             cur.execute(
-                "SELECT id, user_id, title, created_at, updated_at "
+                "SELECT id, user_id, title, created_at, updated_at, "
+                "COALESCE(confidential_seen, 0) AS confidential_seen, "
+                "COALESCE(kind, 'chat') AS kind "
                 "FROM chat_threads WHERE id = %s", (thread_id,),
             )
             row = cur.fetchone()
@@ -675,7 +836,13 @@ class PostgresThreadsRepo:
         return out
 
     # ── messages ────────────────────────────────────────────────────
-    def append_messages(self, thread_id: str, messages: list[BaseMessage]) -> None:
+    def append_messages(self, thread_id: str, messages: list[BaseMessage],
+                        *, sensitive: bool = False, hidden: bool = False) -> None:
+        """메시지 적재.
+
+        `sensitive=True` 면 기밀 턴 산출(비기밀 턴 컨텍스트에서 빠진다),
+        `hidden=True` 면 조합의 중간 단계(채팅에 렌더하지 않는다).
+        """
         if not messages:
             return
         from . import _pg
@@ -688,12 +855,14 @@ class PostgresThreadsRepo:
             seq = int(cur.fetchone()["mx"]) + 1
             for m in messages:
                 cur.execute(
-                    "INSERT INTO chat_messages (id, thread_id, seq, data_json) "
-                    "VALUES (%s, %s, %s, %s::jsonb)",
+                    "INSERT INTO chat_messages "
+                    "(id, thread_id, seq, data_json, sensitive, hidden) "
+                    "VALUES (%s, %s, %s, %s::jsonb, %s, %s)",
                     (
                         getattr(m, "id", None) or new_id(),
                         thread_id, seq,
-                        json.dumps(message_to_dict(m), ensure_ascii=False),
+                        _dump_message(m, sensitive),
+                        bool(sensitive), bool(hidden),
                     ),
                 )
                 seq += 1

@@ -202,7 +202,12 @@ python scripts/maintenance.py schedule 04:00 04:20 "데이터 갱신 중"   # �
 ### 3-5. 백업·복구
 
 - `medi-backup` 이 매일 `medi`·`medi_auth` 를 pg_dump → `medi_backups` 볼륨(`BACKUP_RETENTION_DAYS`, 기본 14일).
+  **기동 직후 1회** 실행 후 간격 대기(2026-10-02). 종전엔 `sleep` 이 루프 앞이라
+  하루 여러 번 배포하면 **백업이 한 번도 돌지 않았다**(medi-cron 에서 08-03 에 고친
+  동일 버그). 배포 후 `docker compose logs medi-backup | grep '\[backup\]'` 로 1건 확인.
 - 복구: `gunzip -c medi_YYYYMMDD.sql.gz | docker compose exec -T postgres psql -U medi -d medi`
+- ⚠️ **보고서 본문(`blob_data` 볼륨)은 백업 대상이 아니다.** DB 에는 `blob_uri` 만 남으므로
+  DB 만 복구하면 전 보고서가 깨진 포인터가 된다. 오프사이트 복제와 함께 미해결(감사 I2).
 - 분기 1회 복구 리허설(복구해 보지 않은 백업은 백업이 아니다).
 
 ---
@@ -243,6 +248,13 @@ python scripts/maintenance.py schedule 04:00 04:20 "데이터 갱신 중"   # �
 9. **best-effort `except` 주의.** 배선 오류를 조용히 삼킨다. 드물게 실행되는 분기(메일 발송 등)는 e2e 로 검증하고,
    사용자에게 나가는 기능의 e2e 는 로컬이 아니라 **배포 컨테이너 안에서**(`docker compose exec`) 돌린다.
 10. **은퇴한 경로를 되살리지 않는다.** langgraph 런타임·checkpointer·`assistant_id` 트리거는 2026-07-14 은퇴(ADR-0001).
+11. **기밀 턴의 모든 LLM 호출은 `aux_model` 을 지난다.** (2026-10-03) 기밀 모드는 답변 모델 하나가
+    아니라 같은 턴의 보조 호출 전부(압축 요약·커버리지 심판·적용가능성·grounding·무인용 감사·
+    서류 기입)에 걸려야 한다. 감사 전까지 7개 경로가 상용 Haiku 로 새고 있었다. 새 보조 호출을
+    추가할 때 `build_chat_model` 을 직접 부르면 **기밀이 다시 거짓이 된다** — `chat_loop.aux_model`
+    을 쓰고, 기밀 턴 + 원내 없음이면 `None` 을 받아 **건너뛴다**(상용 폴백 금지).
+    `tests/test_sensitive_isolation.py` 가 "기밀 턴 중 상용 팩토리 호출 0회"를 고정한다.
+    보고서(`POST /reports`)는 파이프라인이 원내로 고정될 때까지 `confidential_seen` 스레드를 422 로 막는다.
 
 ---
 
@@ -300,7 +312,12 @@ python scripts/maintenance.py schedule 04:00 04:20 "데이터 갱신 중"   # �
 
 ### 5-4. 정기 점검
 
-- 매일: `df -h`, `docker compose logs --since=24h medi-back | grep ERROR`, `medi-cron`·`medi-backup` 로그
+- 매일: `df -h`, `docker compose logs --since=24h medi-back | grep -E ' (ERROR|WARNING) '`, `medi-cron`·`medi-backup` 로그
+  - 로그 줄 형식은 `시각 레벨 로거: 메시지` (2026-10-02 `src/logging_setup.py`). **그 전까지 앱
+    로거는 root 핸들러가 없어 `info`/`debug` 가 전부 사라지고 WARNING 도 레벨명 없이 찍혔다** —
+    이 `grep` 절차는 그동안 아무것도 잡지 못했다. `LOG_LEVEL` 이 이제 실제로 적용된다.
+  - `/readyz` 의 `pii_ner` 가 `down` 이면 **PII 게이트가 입력을 차단 중**이다(키 누락). 종전엔
+    미설정이 `ok` 로 보고되며 조용히 fail-open 이었다.
 - 매주: 의존성 보안 업데이트 확인(langchain-core·langchain-anthropic·jwt 등)
 - 분기: 백업 복구 리허설, 시크릿 로테이션 검토
 - TLS: Let's Encrypt 자동 갱신 cron(`certbot renew --quiet && systemctl reload nginx`)

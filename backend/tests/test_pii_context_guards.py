@@ -111,3 +111,24 @@ def test_scrub_input_dev_path_masks_intro_name(monkeypatch):
     out, cats = scrub_input("저는 남궁민수입니다. 2등급 인증 절차 알려주세요")
     assert out.startswith("저는 [이름]입니다")
     assert "이름" in cats
+
+
+# ── ③ 차량번호 오탐 — 사건번호 보호 (2026-10-02) ──────────────────────────
+#
+# `\d{2,3}[가-힣]\s?\d{4}` 는 `2008도6829` 의 **뒤쪽 9글자**(`008도6829`)에
+# 그대로 걸린다. 법률 도구에서 사건번호가 `[차량번호]` 로 마스킹되면 판례를
+# 특정할 수 없어 답변이 무너진다 — 조문 변동 대조를 검증하다 실측으로 잡았다.
+# 선행 숫자 금지(`(?<!\d)`)로 갈리므로, 양쪽을 다 고정한다.
+
+def test_court_case_numbers_are_not_masked_as_plates():
+    """대법원 사건번호는 마스킹되지 않는다."""
+    for case in ("2008도6829", "2020다12345", "대법원 2008도6829 판결"):
+        out = scrub_input(case)[0]
+        assert "[차량번호]" not in out, f"{case} 가 차량번호로 오탐됨 → {out}"
+
+
+def test_real_license_plates_are_still_masked():
+    """실제 번호판은 그대로 잡힌다 — 오탐을 고치며 미탐을 만들지 않는다."""
+    for plate in ("12가3456", "123가4567", "서울 12가3456"):
+        out = scrub_input(plate)[0]
+        assert "[차량번호]" in out, f"{plate} 가 마스킹되지 않음 → {out}"

@@ -30,7 +30,7 @@
 
 | 영역 | 라우트 | 인증 |
 |---|---|---|
-| **채팅 (현행, §8)** | `POST /chat`(SSE), `GET /chat/threads`, `GET /chat/{tid}/state`, `PATCH`·`DELETE /chat/{tid}`, `POST /chat/{tid}/auto-title` | NextAuth JWT (`AuthMiddleware`) |
+| **채팅 (현행, §8)** | `POST /chat`(SSE), `GET /chat/threads`, `GET /chat/{tid}/state`, `PATCH`·`DELETE /chat/{tid}`, `POST /chat/{tid}/auto-title`, `PATCH /chat/{tid}/workflow` | NextAuth JWT (`AuthMiddleware`) |
 | **보고서 (현행, §8)** | `POST /reports`, `GET /reports/runs/{idem}`, `GET /threads/{tid}/reports`, `GET /reports/{rid}`(+`/download`) | NextAuth JWT (+prod `API_TOKEN` Bearer — 조회 3종) |
 | **커스텀 (가이드·모니터)** | `/healthz`, `/readyz`, `/load`, `/legal*`, `/suggestions` | 항상 공개 |
 | ~~LangGraph 기본~~ | ~~`/info`, `/threads`, `/threads/{tid}/runs/stream`, `/threads/{tid}/state`, `/runs/{rid}`, ...~~ | ⛔ **은퇴(2026-07-14)** — §8 로 대체, 호출 시 404 |
@@ -1131,10 +1131,14 @@ python scripts/check_connection.py --origin http://localhost:3000
 | 라우트 | 대체 대상(은퇴) | 응답 |
 |---|---|---|
 | `GET /chat/threads` | langgraph threads 목록 | `{threads:[{thread_id,title,created_at,updated_at}]}` (본인 것만) |
-| `GET /chat/{tid}/state` | `GET /threads/{tid}/state` | `{thread_id,title,messages,steps,selected_law_keys}` |
+| `GET /chat/{tid}/state` | `GET /threads/{tid}/state` | `{thread_id,title,messages,steps,selected_law_keys,confidential_seen,kind,workflow}` |
 | `PATCH /chat/{tid}` `{title}` | threads.update(metadata.title) | `{ok,thread_id,title}` (제목 1~60자) |
 | `DELETE /chat/{tid}` | `DELETE /threads/{tid}` | `{ok,thread_id}` (메시지·steps 포함 삭제) |
 | `POST /chat/{tid}/auto-title` | `POST /threads/{tid}/auto-title` | `{thread_id,title}` (shape 동일, loopback 불요) |
+| `PATCH /chat/{tid}/workflow` | — (신규 2026-10-02) | 기능 조합 저장. body = `{steps:[{fn,values,files,confidential,done}],cursor,mode,status}` (구버전 문자열 배열도 승격). `steps:[]` 면 조합 종료. 최대 8단계 · 단계당 파일 3개. **feature id 는 검증하지 않는다** — 목록의 진실원은 프런트 `lib/features/catalog.ts` 이고, 여기서 화이트리스트를 복제하면 기능 추가 때마다 어긋난다 |
+| `POST /chat/{tid}/workflow/files` (multipart) | — | 조합 단계 첨부 업로드. 추출 텍스트를 **암호화해 스레드에 보관**. 응답 `{id,name,chars,truncated}` — 본문은 안 싣는다 |
+| `DELETE /chat/{tid}/workflow/files/{id}` | — | 조합 첨부 삭제 |
+| `POST /chat/{tid}/workflow/suggest` `{title,fields}` | — | 다음 단계 입력 제안 `{values}`. 맥락은 **비기밀 ai 산출**만 쓴다 — 기밀 단계 산출을 상용 모델에 넘기면 격리가 샌다 |
 
 - 소유자 아닌 thread 404(비노출). 조회 GET 은 쿼터 초과여도 허용.
 
@@ -1306,3 +1310,43 @@ python scripts/check_connection.py --origin http://localhost:3000
 - 수동 발송(`/send`)은 `last_sent_at` 을 건드리지 않는다 — 정기 발송은 예정대로 나간다.
 - 주기 루프는 `MONITOR_REPORT_CHECK_INTERVAL_S`(기본 900초, 0=끔). 부팅 3분 뒤 첫 점검.
 - 판정과 기록은 **같은 시각**으로 묶인다(`run_due`) — 주기 경계에서 중복 발송 방지.
+
+## 서면·의견서 초안 (2026-10-01)
+
+변호사 업무지원 4/4. 서식(`/documents/from-form`)과 저장·패널·다운로드를 공유하고
+**문단 단위 수정**만 다르다. 설계 근거는 `src/brief.py` 머리말.
+
+| 엔드포인트 | 용도 |
+|---|---|
+| `POST /documents/from-brief` | 대화 → 초안 생성. body `{thread_id, title?}` |
+| `GET /documents/{id}/paragraphs` | 현재 문단 목록 + 문서가 쓰는 인용 번호 |
+| `POST /documents/{id}/revise` | 문단 하나 교체 |
+
+### 왜 조문 본문이 필요 없나
+
+근거는 이미 대화의 인용에 있다. 그래서 openlaw PG·검색 API `/articles/bodies` 가
+막혀 있어도 초안은 만들어진다(서식 작성은 그 경로가 막히면 열리지 않는다).
+
+### `POST /documents/{id}/revise`
+
+```json
+{"index": 2, "original_text": "화면에 보이는 그 문단 전문",
+ "instruction": "더 간결하게",        // AI 수정
+ "replacement": "직접 쓴 문장"}        // 또는 직접 수정(둘 중 하나)
+```
+
+| 응답 | 의미 |
+|---|---|
+| `200` | `{ok, index, before, after, dropped_citations, paragraphs}` |
+| `409` | `original_text` 가 현재 내용과 다름 → `detail.current` 에 현재 내용 |
+| `422` | 인자 누락, 또는 모델이 지시를 수행하지 못함 |
+| `503` | 원내 작성 모델 미설정·연결 불가 (**상용 모델로 넘기지 않는다**) |
+
+두 가지 안전장치가 서버에 있다:
+
+1. **낙관적 동시성** — `original_text` 대조. 조용히 다른 문단을 고치느니 거부한다.
+2. **인용 번호 보호** — 문서에 없는 `[n]` 은 제거하고 `dropped_citations` 로 알린다.
+   모델이 근거를 지어내는 가장 흔한 형태가 없는 번호 붙이기다.
+
+`replacement`(사용자가 직접 친 문장)는 원내 모델 게이트를 거치지 않는다 — 모델을
+안 쓰는 경로이므로 503 으로 막을 이유가 없다.

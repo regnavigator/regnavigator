@@ -34,6 +34,14 @@ _SEARCH_SEM: threading.BoundedSemaphore | None = None
 _SEARCH_SEM_LOCK = threading.Lock()
 
 
+def _search_wait_timeout_s() -> float:
+    """세마포어 대기 상한(초). 기본 30 — 리랭커 한 건이 수 초라 2슬롯이면 넉넉하다."""
+    try:
+        return float((os.getenv("SEARCH_WAIT_TIMEOUT_S") or "").strip() or "30")
+    except ValueError:
+        return 30.0
+
+
 def _search_semaphore() -> threading.BoundedSemaphore:
     global _SEARCH_SEM
     if _SEARCH_SEM is None:
@@ -167,9 +175,16 @@ def search_articles(
 
     sem = _search_semaphore()
     if not sem.acquire(blocking=False):
+        # 대기에 **상한**을 건다(2026-10-02). 종전 `sem.acquire()` 는 무한 대기였고
+        # 그 대기가 `asyncio.to_thread` 스레드를 붙잡는다 — 캐시 미스가 몰리면
+        # 스레드풀(기본 cpu+4)이 검색 대기로 고갈돼 **DB·SMTP·PII 까지 포함한 전
+        # 요청이 같이 멈춘다**. 못 기다리면 명시적으로 거절한다(503 로 번역됨).
         load.search_wait(1)  # 만석 → 대기 시작(사용자에 혼잡 표시)
         try:
-            sem.acquire()
+            if not sem.acquire(timeout=_search_wait_timeout_s()):
+                raise SearchApiError(
+                    "검색 서버가 혼잡해 잠시 기다렸지만 차례가 오지 않았습니다. "
+                    "잠시 후 다시 시도해 주세요.")
         finally:
             load.search_wait(-1)
     load.search_active(1)

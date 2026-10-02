@@ -18,6 +18,8 @@ import { listAnnex, parseAttachmentKey, type AnnexListItem } from "@/lib/client/
 import { getAnnex } from "@/lib/client/annex";
 import { AnnexModal } from "@/components/chat/AnnexModal";
 import type { Citation } from "@/lib/store/types";
+import { articleKeyFromCitation } from "@/lib/client/article";
+import { formDocKindOf } from "@/lib/formEntry";
 
 type FormHit = {
   key: string;
@@ -85,17 +87,67 @@ function score(title: string, kws: { strong: string[]; weak: string[]; body: str
   return s;
 }
 
+const ANNEX_CATS = new Set(["법령별표서식", "행정규칙별표서식", "자치법규별표서식"]);
+
+/**
+ * 이번 턴이 **이미 수집한 인용** 중 서식을 추린다 (2026-10-01).
+ *
+ * 원래 경로는 `/annex/list?lawId=` 지만 그건 별표 DB(Neo4j/PG)가 붙어 있어야
+ * 하고, 미연결이면 `count: 0` 만 돌아온다 — 그래서 카드가 통째로 안 보였다
+ * (실사용 신고: "검색은 됐는데 서식 작성이 안 열려").
+ *
+ * 그런데 검색 결과에는 서식 청크가 이미 들어와 있다. 모델이 본문에서 그 인용을
+ * 안 썼을 뿐이다. DB 없이도 여기서 바로 꺼낼 수 있다.
+ */
+function formsFromCitations(citations: Citation[], kws: ReturnType<typeof keywords>): FormHit[] {
+  const out: FormHit[] = [];
+  const seen = new Set<string>();
+  for (const c of citations) {
+    if (!c.doc_category || !ANNEX_CATS.has(c.doc_category)) continue;
+    if (formDocKindOf(c) !== "form") continue;      // 기준표(별표)는 기입 대상이 아니다
+    const key = articleKeyFromCitation(c);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    const full = (c.title ?? "").trim();
+    // "공중위생관리법 시행규칙 별표: 영업신고서" → 법령명 / 서식명 분리
+    const m = full.match(/^(.*?)\s*(?:별표|별지)\s*:\s*(.+)$/);
+    const lawTitle = (m?.[1] ?? full).trim();
+    const title = (m?.[2] ?? full).trim();
+    out.push({
+      key,
+      title,
+      lawId: c.doc_id ?? "",
+      lawTitle,
+      annexNum: parseAttachmentKey(key).annexNum,
+      score: score(title, kws),
+    });
+  }
+  return out;
+}
+
 export function RelatedFormsCard({
   question,
   answer,
   citations,
+  poolCitations,
   onUseAsForm,
 }: {
   question: string;
   answer: string;
+  /** 답변 본문이 실제로 인용한 것 — 법령 id 추출용 */
   citations: Citation[];
+  /**
+   * 이 턴이 **수집한 전체** 인용(step.citations, 2026-10-01).
+   *
+   * `citations` 는 본문에 `[n]` 으로 쓰인 것만이다(References 신뢰성 원칙).
+   * 그런데 서식은 모델이 본문에서 거의 인용하지 않는다 — 조문을 인용하고
+   * "별지 제1호서식입니다" 라고 쓴다. 그래서 추천 카드는 수집분까지 본다.
+   * 이건 References 가 아니라 **제안**이므로 그 원칙과 충돌하지 않는다.
+   */
+  poolCitations?: Citation[];
   onUseAsForm: (articleKey: string, title: string) => void;
 }) {
+  const pool = poolCitations?.length ? poolCitations : citations;
   const laws = useMemo(() => {
     const out: { id: string; title: string }[] = [];
     const seen = new Set<string>();
@@ -144,12 +196,13 @@ export function RelatedFormsCard({
   };
 
   useEffect(() => {
+    const kws = keywords(question, answer);
     if (!laws.length) {
-      setHits([]);
+      // 법령 id 를 못 뽑아도 인용에 서식이 있으면 보여 준다.
+      setHits(formsFromCitations(pool, kws).sort((a, b) => b.score - a.score));
       return;
     }
     let alive = true;
-    const kws = keywords(question, answer);
     void Promise.all(laws.map((l) => fetchForms(l.id).then((items) => ({ l, items })))).then(
       (groups) => {
         if (!alive) return;
@@ -169,6 +222,18 @@ export function RelatedFormsCard({
             });
           }
         }
+        // 답변이 **실제로 인용한 법령**의 서식을 앞세운다(2026-10-01). 토큰 겹침만
+        // 보면 `지방세기본법 시행규칙: 공중위생영업 신고에 관한 자료` 가
+        // `공중위생관리법 시행규칙: 영업신고서` 를 제치는 일이 생긴다(실측).
+        const citedLawIds = new Set(citations.map((c) => c.doc_id).filter(Boolean));
+        for (const h of all) if (h.lawId && citedLawIds.has(h.lawId)) h.score += 3;
+        // 인용에서 뽑은 서식을 합친다 — 같은 key 는 목록 쪽(별표 메타가 풍부)을 남긴다.
+        for (const h of formsFromCitations(pool, kws)) {
+          if (seen.has(h.key)) continue;
+          seen.add(h.key);
+          if (h.lawId && citedLawIds.has(h.lawId)) h.score += 3;
+          all.push(h);
+        }
         all.sort((a, b) => b.score - a.score || a.title.localeCompare(b.title, "ko"));
         setHits(all);
       },
@@ -176,7 +241,7 @@ export function RelatedFormsCard({
     return () => {
       alive = false;
     };
-  }, [laws, question, answer]);
+  }, [laws, pool, citations, question, answer]);
 
   useEffect(() => {
     if (revealFrom === null) return;

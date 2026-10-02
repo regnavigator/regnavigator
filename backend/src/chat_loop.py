@@ -32,6 +32,7 @@ import json
 import logging
 import os
 import re
+from dataclasses import replace
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any, AsyncIterator, Optional
@@ -265,6 +266,50 @@ TOOL_SPECS: list[dict] = [
 # ---------------------------------------------------------------------------
 # 모델 빌드 — src.models.build_chat_model (provider 직접 생성) 사용
 # ---------------------------------------------------------------------------
+# ── 보조 LLM 호출의 기밀 정책 (2026-10-03) ──────────────────────────────────
+#
+# 감사 결과: 기밀 모드는 답변 모델 1개와 웹 도구에만 걸려 있었고, 같은 턴의 보조
+# LLM 호출(압축 요약·커버리지 심판·적용가능성·grounding·무인용 감사·서류 기입)은
+# 전부 상용 Haiku 로 나갔다. "기밀" 이라는 약속이 거짓이었다.
+#
+# 보조 호출은 전부 모듈 전역 함수라 `confidential` 을 인자로 꿰기 어렵다. 그래서
+# **턴 단위 contextvar** 하나를 두고, 보조 호출이 모델을 만들 때 이걸 본다:
+#   - 기밀 턴 + 원내 모델 있음 → 원내 모델로 (`aux_model()`)
+#   - 기밀 턴 + 원내 모델 없음 → **건너뛴다** (`aux_model()` 이 None)
+#   - 비기밀 턴 → 상용 그대로
+# 보조 품질이 조금 떨어지더라도 사건 내용이 밖으로 나가는 것보다 낫다.
+
+import contextvars as _cv
+
+_AUX_POLICY: _cv.ContextVar[Optional[dict]] = _cv.ContextVar("aux_policy", default=None)
+
+
+def set_aux_policy(*, confidential: bool, local_model: Optional[str]) -> None:
+    """턴 시작 시 호출 — 이 턴의 보조 호출이 따를 정책."""
+    _AUX_POLICY.set({"confidential": bool(confidential), "local_model": local_model})
+
+
+def aux_model(spec: str, *, max_tokens: int):
+    """보조 호출용 모델. 기밀 턴에 원내 모델이 없으면 **None** — 호출자는 건너뛴다.
+
+    `build_chat_model(spec)` 을 직접 부르는 보조 경로는 이걸로 바꿔야 한다.
+    """
+    pol = _AUX_POLICY.get()
+    if not pol or not pol["confidential"]:
+        return build_chat_model(spec, max_tokens=max_tokens)
+    if pol["local_model"]:
+        from src import skill_local as _skill_local
+
+        return _skill_local.build_model(pol["local_model"], max_tokens=max_tokens)
+    _log.info("보조 LLM 호출 건너뜀 — 기밀 턴인데 원내 모델이 없다(spec=%s)", spec)
+    return None
+
+
+def is_confidential_turn() -> bool:
+    pol = _AUX_POLICY.get()
+    return bool(pol and pol["confidential"])
+
+
 def _base_model(spec: str):
     """대화용 모델 — CHAT_MAX_TOKENS 반영. (요약·제목 등 저비용 콜도 재사용.)"""
     try:
@@ -393,7 +438,13 @@ async def _summarize_text(block: str, prev_summary: Optional[str]) -> str:
         or os.getenv("SUBAGENT_MODEL")
         or "anthropic:claude-haiku-4-5-20251001"
     )
-    model = _base_model(spec)
+    try:
+        max_tokens = int((os.getenv("CHAT_MAX_TOKENS") or "").strip() or "4096")
+    except ValueError:
+        max_tokens = 4096
+    model = aux_model(spec, max_tokens=max_tokens)
+    if model is None:
+        return ""  # 기밀 턴 + 원내 없음 → 요약 생략(무압축 진행 — 호출자가 처리)
     prompt = _SUMMARY_PROMPT.format(
         prev_note=" (기존 요약이 있으면 병합)" if prev_summary else "",
         prev_block=f"=== 기존 요약 ===\n{prev_summary}\n\n" if prev_summary else "",
@@ -502,6 +553,44 @@ def _scrub_user_text(text: str) -> tuple[str, list[str], list[dict]]:
     except Exception as e:  # noqa: BLE001 — 그 외 게이트 오류가 대화를 막으면 안 됨
         _log.warning("chat_loop pii at-rest skipped: %s", e)
         return text, [], []
+
+
+#: 기밀 메시지가 빠진 자리에 남기는 표식. 내용은 주지 않되 "앞에 뭔가 있었다"는
+#: 사실은 알려야 모델이 맥락 단절을 날조로 메우지 않는다.
+SENSITIVE_PLACEHOLDER = "(기밀 단계에서 처리된 내용 — 이 대화에는 포함되지 않습니다)"
+
+
+def _drop_sensitive(state: ThreadState) -> ThreadState:
+    """기밀 턴에서 나온 메시지를 이력에서 제거한다(비기밀 턴용).
+
+    제거한 자리에 human 플레이스홀더 하나를 남긴다 — 연속된 기밀 구간은 하나로
+    합친다. tool 메시지를 짝 없이 남기면 Anthropic 히스토리 규칙에 걸리므로
+    **구간 통째로** 뺀다.
+
+    `seqs` 를 `messages` 와 평행하게 유지해야 한다 — 대화 압축이 둘을 zip 한다.
+    """
+    flags = state.sensitive or []
+    if not any(flags):
+        return state
+
+    msgs = state.messages
+    seqs = state.seqs or list(range(len(msgs)))
+    out_m: list[BaseMessage] = []
+    out_s: list[int] = []
+    prev_dropped = False
+    for i, m in enumerate(msgs):
+        if i < len(flags) and flags[i]:
+            if not prev_dropped:
+                out_m.append(HumanMessage(content=SENSITIVE_PLACEHOLDER))
+                out_s.append(seqs[i] if i < len(seqs) else i)
+                prev_dropped = True
+            continue
+        prev_dropped = False
+        out_m.append(m)
+        out_s.append(seqs[i] if i < len(seqs) else i)
+
+    return replace(state, messages=out_m, seqs=out_s,
+                   sensitive=[False] * len(out_m))
 
 
 def _egress_scrub(messages: list[BaseMessage]) -> list[BaseMessage]:
@@ -972,6 +1061,21 @@ def _tool_qdrant(args: dict, state: dict, tcid: str) -> ToolExec:
         _log.debug("rag_search event emit failed", exc_info=True)
 
     citations = _assign_turn_citation_numbers(state, [c for _, _, c in core.built])
+
+    # 적용가능성 판정(2026-10-02) — 규칙(`source_filter`)이 법령명만 보고 놓친
+    # 것을 받는다. 제목·발췌만 보내는 하이쿠 1콜이고, 실패하면 아무것도 거르지
+    # 않는다(검증 계층이 답변을 막으면 안 된다는 이 저장소 규율).
+    _unfit: dict[int, str] = {}
+    try:
+        from src import applicability
+
+        _unfit = applicability.judge_sync(query, citations)
+    except Exception:  # noqa: BLE001
+        _log.debug("applicability judge failed", exc_info=True)
+    if _unfit:
+        _log.info("applicability: %d건 제외 %s", len(_unfit), sorted(_unfit))
+        citations = [c for c in citations if c.get("number") not in _unfit]
+
     num_by_id = {c["id"]: c["number"] for c in citations}
     msg = (f"{len(citations)}건 (선택 법령 grounding)" if pinned
            else f"{len(citations)}건 매칭")
@@ -983,6 +1087,39 @@ def _tool_qdrant(args: dict, state: dict, tcid: str) -> ToolExec:
         if h is not None and c["id"] in num_by_id
     ]
     text = _format_rag_hits(numbered_hits)
+
+    # 관할 되묻기(2026-10-02) — 자치법규를 다수 걸렀으면 모델에게 **지역을 묻게**
+    # 한다. 버리고 입을 닫으면 "지자체마다 다르다"는 사실까지 사라지고, 추측해서
+    # 특정 지자체 조례를 인용하면 그게 더 나쁜 오안내다(사용자 결정).
+    _dropped = list(getattr(core, "filtered_out", None) or [])
+    if _dropped:
+        from src import source_filter as _sf
+
+        _hint = _sf.region_hint(_dropped)
+        if _hint:
+            text = f"{text}\n\n{_hint}"
+        try:
+            from src.persistence import get_events_repo as _ger
+            from src.persistence.events_repo import Event as _Ev2
+
+            _ger().emit(_Ev2(
+                id="", ts="", event_type="source_filter",
+                user_id=state.get("user_id"), thread_id=state.get("thread_id"),
+                payload_json=_json.dumps({
+                    "query": query[:200],
+                    "dropped": len(_dropped),
+                    "kept": len(citations),
+                    # 사유별 건수만 — 제목은 길고, 집계가 목적이다.
+                    "reasons": {r: sum(1 for d in _dropped
+                                       if d["reason"].split("(")[0] == r)
+                                for r in {d["reason"].split("(")[0]
+                                          for d in _dropped}},
+                    "samples": [d["title"][:60] for d in _dropped[:5]],
+                }, ensure_ascii=False),
+            ))
+        except Exception:
+            _log.debug("source_filter event emit failed", exc_info=True)
+
     return ToolExec(
         ToolMessage(content=text, tool_call_id=tcid),
         [start, step_done(sid, output_preview=f"{len(citations)}건 매칭",
@@ -1032,8 +1169,14 @@ async def _inject_searches(
     user_id: Optional[str],
     emit,
     turn_steps: list[dict],
+    sensitive: bool = False,
+    hidden: bool = False,
 ) -> list[dict]:
     """커버리지 게이트(2·3층)가 지시한 겨냥 검색을 직접 실행해 히스토리에 주입.
+
+    `sensitive`/`hidden` 은 저장 플래그(기밀 턴·조합 중간 단계) — 호출부가 턴 값을
+    넘긴다. ⚠️ 2026-10-03: 본문은 이 인자를 쓰는데 시그니처에 빠져 있었다(ruff F821).
+    커버리지 LLM 경로를 테스트가 스텁해 실제로 돌면 TypeError 가 나는 상태였다.
 
     모델에게 "다시 검색해"라고 맡기면 같은 질의를 반복할 수 있어, 심판이 지정한
     query+doc_kinds 를 그대로 tool_use/tool_result 쌍으로 실행·주입한다. 다음
@@ -1054,7 +1197,8 @@ async def _inject_searches(
     ]
     ai = AIMessage(content="", tool_calls=tool_calls, id=f"msg_{uuid4().hex[:12]}")
     state.messages.append(ai)
-    await asyncio.to_thread(repo.append_messages, thread_id, [ai])
+    await asyncio.to_thread(repo.append_messages, thread_id, [ai],
+                            sensitive=sensitive, hidden=hidden)
 
     # 겨냥 검색은 **서로 독립**이라 병렬 실행한다(2026-08-19). 종전 순차 루프는
     # 검색 1건당 ~1s 를 그대로 더했다(실측: 2건 주입 시 +2.0s). 결과는 tool_calls
@@ -1076,10 +1220,13 @@ async def _inject_searches(
             fallback = ToolMessage(
                 content="검색을 완료하지 못했습니다.", tool_call_id=tc["id"])
             state.messages.append(fallback)
-            await asyncio.to_thread(repo.append_messages, thread_id, [fallback])
+            await asyncio.to_thread(repo.append_messages, thread_id, [fallback],
+                                    sensitive=sensitive, hidden=hidden)
             continue
         state.messages.append(result.tool_message)
-        await asyncio.to_thread(repo.append_messages, thread_id, [result.tool_message])
+        await asyncio.to_thread(repo.append_messages, thread_id,
+                                [result.tool_message],
+                                sensitive=sensitive, hidden=hidden)
         if result.steps:
             state.steps = merge_steps_by_id(state.steps, result.steps)
             await asyncio.to_thread(repo.merge_steps, thread_id, result.steps)
@@ -1250,6 +1397,7 @@ async def run_chat_turn(
     models: Optional[tuple[Any, Any]] = None,  # 테스트 주입용 (normal, forced)
     style: Optional[str] = None,  # "expert" | "simple" — 답변 설명 수준
     confidential: bool = False,  # 기밀 모드 — 온프레미스 전용 처리
+    hidden: bool = False,  # 조합 중간 단계 — 채팅에 렌더하지 않는다
     skill_hint: Optional[str] = None,  # "irb_drb" — 프런트 버튼 명시 진입
 ) -> AsyncIterator[dict]:
     """한 턴 실행 — 이벤트 dict 스트림.
@@ -1275,7 +1423,8 @@ async def run_chat_turn(
                     thread_id, user_text, user_id=user_id,
                     selected_law_keys=selected_law_keys,
                     model_name=model_name, models=models, emit=_emit,
-                    style=style, confidential=confidential, skill_hint=skill_hint,
+                    style=style, confidential=confidential, hidden=hidden,
+                    skill_hint=skill_hint,
                 )
         except Exception as e:  # noqa: BLE001 — 스트림에 사용자향 에러 후 종료
             _log.exception("chat_loop turn failed: %s", e)
@@ -1286,6 +1435,10 @@ async def run_chat_turn(
         finally:
             _release_turn_lock(thread_id)
             reset_progress_sink(token)
+            # 보조 호출 정책도 턴과 함께 끝난다 — 안 지우면 다음 턴(같은 태스크·
+            # 테스트)이 앞 턴의 기밀 정책을 물려받는다(2026-10-03 실측: 전체
+            # 테스트 순서에서만 applicability 가 "원내 없음→생략" 을 상속해 실패).
+            _AUX_POLICY.set(None)
             queue.put_nowait(_DONE)
 
     task = asyncio.create_task(_worker())
@@ -1327,6 +1480,7 @@ async def _run_turn(
     emit,
     style: Optional[str] = None,
     confidential: bool = False,  # 기밀 모드 — 온프레미스 전용 처리
+    hidden: bool = False,  # 조합 중간 단계 — 채팅에 렌더하지 않는다
     skill_hint: Optional[str] = None,
 ) -> None:
     # 동기 I/O(SQLite·PII NER HTTP)는 전부 to_thread — 이벤트 루프 점유 방지.
@@ -1335,6 +1489,17 @@ async def _run_turn(
     await asyncio.to_thread(repo.ensure_thread, thread_id, user_id=user_id)
     await asyncio.to_thread(repo.set_selected_law_keys, thread_id, selected_law_keys)
     state: ThreadState = await asyncio.to_thread(repo.get_state, thread_id)
+
+    # 기밀 단계 격리(2026-10-02) — **비기밀 턴은 기밀 메시지를 보지 못한다.**
+    #
+    # 이게 단계별 기밀의 전부다. 요청 컨텍스트는 스레드 전체 이력이라, 이 필터가
+    # 없으면 앞 기밀 단계 내용이 다음 비기밀 단계에서 통째로 상용 모델로 나간다.
+    # UI 토글만 두는 것은 보호가 아니라 보호하는 척이다.
+    #
+    # 압축보다 **먼저** 건다 — 이후 경로(요약·의도판정·도구 카운트·egress)가 전부
+    # 걸러진 이력만 보도록. 기밀 턴은 원내 모델이므로 전체를 본다.
+    if not confidential:
+        state = _drop_sensitive(state)
 
     # 대화 압축 — 임계 초과 시 오래된 턴을 요약으로 대체(working set 만, DB 보존).
     working, summary = await _maybe_compact(repo, state)
@@ -1348,10 +1513,17 @@ async def _run_turn(
         _msg_text(getattr(prev_humans[-1], "content", None))[:60]
         if prev_humans else None
     )
-    _scrub_result, turn_force_search = await asyncio.gather(
-        asyncio.to_thread(_scrub_user_text, user_text),
-        asyncio.to_thread(_intent_force_search, user_text, intent_ctx),
-    )
+    # 기밀 턴은 의도 분류 서비스에 원문을 보내지 않는다(2026-10-03) — 원내 DGX 가
+    # 전제지만 코드에 강제가 없었다. 기밀이면 규제 질의로 보고 검색을 강제한다
+    # (휴리스틱 폴백도 거치지 않는다 — 어차피 기밀 질의는 거의 전부 규제 질의다).
+    if confidential:
+        _scrub_result = await asyncio.to_thread(_scrub_user_text, user_text)
+        turn_force_search = True
+    else:
+        _scrub_result, turn_force_search = await asyncio.gather(
+            asyncio.to_thread(_scrub_user_text, user_text),
+            asyncio.to_thread(_intent_force_search, user_text, intent_ctx),
+        )
     scrubbed, pii_found, pii_spans = _scrub_result
 
     # 기관 내부 지침 스킬(IRB/DRB) — 3단 스위치(env·화이트리스트·프리게이트/스티키).
@@ -1368,8 +1540,12 @@ async def _run_turn(
     # at-rest PII 스크럽 후 저장 (PiiGate before_agent 대응)
     human = HumanMessage(content=scrubbed, id=f"msg_{uuid4().hex[:12]}")
     state.messages.append(human)
-    await asyncio.to_thread(repo.append_messages, thread_id, [human])
-    emit({"type": "meta", "thread_id": thread_id, "human_message_id": human.id})
+    await asyncio.to_thread(repo.append_messages, thread_id, [human],
+                            sensitive=confidential, hidden=hidden)
+    # `hidden` 은 스트리밍 중에도 필요하다 — 안 주면 조합 단계가 화면에 쏟아졌다가
+    # 새로고침 후에야 사라진다.
+    emit({"type": "meta", "thread_id": thread_id, "human_message_id": human.id,
+          **({"hidden": True} if hidden else {})})
 
     # 입력이 PII 필터링된 경우 프론트에 알림(배지/토스트). 카테고리는 중복 제거.
     # 프론트: 이 메시지에 "개인정보(이름·주소 등)가 자동 제거되었습니다" 가벼운 표시.
@@ -1438,7 +1614,8 @@ async def _run_turn(
             )
             ai_notice = AIMessage(content=notice, id=f"msg_{uuid4().hex[:12]}")
             state.messages.append(ai_notice)
-            await asyncio.to_thread(repo.append_messages, thread_id, [ai_notice])
+            await asyncio.to_thread(repo.append_messages, thread_id, [ai_notice],
+                                    sensitive=confidential, hidden=hidden)
             emit({"type": "token", "text": notice, "message_id": ai_notice.id})
             emit({"type": "done", "thread_id": thread_id,
                   "message_id": ai_notice.id, "text": notice, "steps": []})
@@ -1462,7 +1639,8 @@ async def _run_turn(
             notice = _skill_local.CONFIDENTIAL_NOT_CONFIGURED_NOTICE
             ai_notice = AIMessage(content=notice, id=f"msg_{uuid4().hex[:12]}")
             state.messages.append(ai_notice)
-            await asyncio.to_thread(repo.append_messages, thread_id, [ai_notice])
+            await asyncio.to_thread(repo.append_messages, thread_id, [ai_notice],
+                                    sensitive=confidential, hidden=hidden)
             emit({"type": "token", "text": notice, "message_id": ai_notice.id})
             emit({"type": "done", "thread_id": thread_id,
                   "message_id": ai_notice.id, "text": notice, "steps": []})
@@ -1480,7 +1658,8 @@ async def _run_turn(
                                       id=f"msg_{uuid4().hex[:12]}")
                 state.messages.append(ai_notice)
                 await asyncio.to_thread(
-                    repo.append_messages, thread_id, [ai_notice])
+                    repo.append_messages, thread_id, [ai_notice],
+                    sensitive=confidential, hidden=hidden)
                 emit({"type": "token", "text": notice,
                       "message_id": ai_notice.id})
                 emit({"type": "done", "thread_id": thread_id,
@@ -1488,8 +1667,36 @@ async def _run_turn(
                 _log.warning("skill_local: 로컬 모델 사용 불가 — 안내 후 종료 "
                              "(상용 폴백 금지)")
                 return
-            _log.info("skill_local: 스킬 턴 로컬 라우팅 — model=%s",
-                      local_skill_model)
+            _log.info("skill_local: 로컬 라우팅 — model=%s confidential=%s",
+                      local_skill_model, confidential)
+            # 어떤 경로로 처리되는지 사용자에게 알린다(2026-10-01 요구) — 조용히
+            # 원내 모델로 돌면 사용자는 보호되는지 알 수 없고, 반대로 보호된다고
+            # 착각할 수도 있다. 실제 라우팅이 확정된 **이 지점**에서만 보낸다.
+            emit({
+                "type": "processing_mode",
+                "thread_id": thread_id,
+                "local": True,
+                "confidential": bool(confidential),
+                "web_search": False,   # 로컬 라우팅 턴은 웹 도구를 받지 않는다
+            })
+            if confidential:
+                # 이 스레드에 기밀 내용이 들어왔음을 영속한다. 이후 기밀을 끄면
+                # 저장된 이 대화가 통째로 상용 모델로 가므로 FE 가 경고해야 한다.
+                # ⚠️ 삼키지 않는다(2026-10-03). 종전엔 WARNING 한 줄이었다 — 기록이
+                # 안 되면 FE 가 "기밀 끄면 이 대화가…" 경고를 못 띄우고, 사용자는
+                # 모른 채 끈다. 보호 기록 실패는 답변 실패와 같은 무게다.
+                try:
+                    await asyncio.to_thread(repo.mark_confidential, thread_id)
+                except Exception as e:  # noqa: BLE001
+                    _log.error("confidential_seen 기록 실패 thread=%s", thread_id,
+                               exc_info=True)
+                    notice = ("기밀 보호 기록을 저장하지 못해 이 요청을 처리하지 "
+                              "않았습니다. 잠시 후 다시 시도해 주세요.")
+                    emit({"type": "error", "message": notice})
+                    raise RuntimeError("confidential_seen 기록 실패") from e
+
+    # 이 턴의 보조 호출 정책 — 여기서부터 압축·심판·grounding·감사·기입이 전부 본다.
+    set_aux_policy(confidential=bool(confidential), local_model=local_skill_model)
 
     # system prompt — supervisor(안정, 캐시) + 가변(보고서 컨텍스트·요약, 비캐시).
     # 안정 부분에 캐시 breakpoint → tools+supervisor 프리픽스를 프롬프트 캐시에 태운다.
@@ -1743,7 +1950,8 @@ async def _run_turn(
                                  "id": inj_tcid, "type": "tool_call"}],
                     id=f"msg_{uuid4().hex[:12]}")
                 state.messages.append(ai_inj)
-                await asyncio.to_thread(repo.append_messages, thread_id, [ai_inj])
+                await asyncio.to_thread(repo.append_messages, thread_id, [ai_inj],
+                                        sensitive=confidential, hidden=hidden)
                 tool_state = state.as_tool_state()
                 tool_state["thread_id"] = thread_id
                 tool_state["user_id"] = user_id
@@ -1752,7 +1960,8 @@ async def _run_turn(
                     inj_tcid, built)
                 state.messages.append(result.tool_message)
                 await asyncio.to_thread(
-                    repo.append_messages, thread_id, [result.tool_message])
+                    repo.append_messages, thread_id, [result.tool_message],
+                    sensitive=confidential, hidden=hidden)
                 if result.steps:
                     state.steps = merge_steps_by_id(state.steps, result.steps)
                     await asyncio.to_thread(repo.merge_steps, thread_id, result.steps)
@@ -1822,7 +2031,8 @@ async def _run_turn(
                     _log.info(
                         "chat_loop: 커버리지 게이트 — 겨냥 검색 %d건 주입", len(searches))
                     turn_steps = await _inject_searches(
-                        searches[:2], state, repo, thread_id, user_id, emit, turn_steps)
+                        searches[:2], state, repo, thread_id, user_id, emit,
+                        turn_steps, sensitive=confidential, hidden=hidden)
                     continue
             except Exception as e:  # noqa: BLE001 — 게이트 실패가 답변을 막으면 안 됨
                 _log.info("coverage gate skipped: %s", e)
@@ -1843,7 +2053,8 @@ async def _run_turn(
         if local_skill_model:
             _prio.touch()
         state.messages.append(ai)
-        await asyncio.to_thread(repo.append_messages, thread_id, [ai])
+        await asyncio.to_thread(repo.append_messages, thread_id, [ai],
+                                sensitive=confidential, hidden=hidden)
 
         tool_calls = list(getattr(ai, "tool_calls", None) or [])
         if not tool_calls:
@@ -1863,7 +2074,8 @@ async def _run_turn(
             result = await _exec_tool(tc, tool_state, tcid)
             state.messages.append(result.tool_message)
             await asyncio.to_thread(
-                repo.append_messages, thread_id, [result.tool_message])
+                repo.append_messages, thread_id, [result.tool_message],
+                sensitive=confidential, hidden=hidden)
             if result.steps:
                 state.steps = merge_steps_by_id(state.steps, result.steps)
                 await asyncio.to_thread(repo.merge_steps, thread_id, result.steps)
@@ -2134,7 +2346,10 @@ async def _run_turn(
 
             # 원문은 온프레미스 모델일 때만 쓰인다(doc_fill.onprem_fill).
             # 서류의 성명·연락처 칸은 마스킹본으로 채울 수 없기 때문.
-            await run_turn_fill(thread_id, scrubbed, emit, raw_text=user_text)
+            if is_confidential_turn() and not local_skill_model:
+                _log.info("doc fill 건너뜀 — 기밀 턴인데 원내 모델이 없다")
+            else:
+                await run_turn_fill(thread_id, scrubbed, emit, raw_text=user_text)
         except Exception:
             # ⚠️ 여기서 삼키면 기입이 통째로 죽어도 조용하다(실측 2026-08-26:
             # 변수명 오타 하나로 전 사용자 서류 기입이 멈춰 있었다). 원인 추적이

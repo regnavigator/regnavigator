@@ -20,6 +20,11 @@ export type Thread = {
   pinned?: boolean;
   /** 본문 검색 결과에만 존재 — 검색어 주변 발췌. */
   match_snippet?: string;
+  /**
+   * 스레드 종류(2026-10-02) — `'chat'` | `'monitor'`.
+   * 사이드바가 「대화」와 「모니터링」 섹션을 가르는 기준이다.
+   */
+  kind?: "chat" | "monitor";
 };
 
 const FALLBACK_TITLE = "새 대화";
@@ -40,6 +45,7 @@ function adaptRow(row: ChatThreadRow): Thread {
     // 신계약의 clarify 는 턴 종료형(영속 인터럽트 상태 없음) — 항상 false.
     has_interrupt: false,
     pinned: !!row.pinned,
+    kind: (row.kind as "chat" | "monitor" | undefined) ?? "chat",
     ...(row.match_snippet ? { match_snippet: row.match_snippet } : {}),
   };
 }
@@ -167,14 +173,26 @@ export async function renameThread(id: string, title: string): Promise<void> {
   notifyThreadListChanged();
 }
 
-export async function deleteThread(id: string): Promise<void> {
+export type DeleteThreadResult = {
+  /** 함께 지워진 관찰 조문 수(모니터링 대상일 때, 2026-10-02) */
+  watch_deleted?: number;
+  /** 함께 지워진 알람 수 */
+  alerts_deleted?: number;
+  documents_deleted?: number;
+  documents_kept?: number;
+};
+
+export async function deleteThread(id: string): Promise<DeleteThreadResult> {
+  let out: DeleteThreadResult = {};
   if (isDummyMode()) {
     const t = await dummyThreads();
     await t.delete(id);
   } else {
-    await apiFetch(`/chat/${encodeURIComponent(id)}`, { method: "DELETE" });
+    out = await apiFetch<DeleteThreadResult>(
+      `/chat/${encodeURIComponent(id)}`, { method: "DELETE" });
   }
   notifyThreadListChanged();
+  return out;
 }
 
 /**

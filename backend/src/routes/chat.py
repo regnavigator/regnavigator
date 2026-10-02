@@ -31,7 +31,7 @@ import os
 import re
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -100,6 +100,14 @@ class ChatRequest(BaseModel):
     # 스킬 명시 진입(2026-08-21) — "irb_drb": IRB/DRB 버튼. 키워드 프리게이트가
     # 놓쳐도 기관 지침 스킬을 부착·강제한다(이중 접근). 미지원 값은 무시.
     skill_hint: str | None = None
+    # 조합의 중간 단계인가(2026-10-02). True 면 이 턴의 메시지는 채팅에 렌더되지
+    # 않는다 — 조합은 단계마다 답을 쏟지 않고 마지막에 한 번만 종합해 보여 준다.
+    # 모델 컨텍스트에는 그대로 들어간다(숨김은 렌더 계층의 일이다).
+    hidden: bool = False
+    # 조합 첨부(2026-10-02) — 스레드에 보관된 파일 id. 서버가 본문을 꺼내
+    # `attachments` 에 합친다. **텍스트를 브라우저로 되돌리지 않는다** — 사건
+    # 파일이 다시 네트워크를 타는 왕복을 없애고, 기밀 단계에서 특히 중요하다.
+    workflow_file_ids: list[str] | None = None
 
 
 def _max_attachments() -> int:
@@ -195,6 +203,28 @@ async def chat(req: ChatRequest, request: Request):
     if not _THREAD_ID_RE.match(thread_id):
         raise HTTPException(status_code=422, detail="invalid thread_id")
 
+    # 조합 첨부를 본문 첨부로 합친다(2026-10-02). 상한 검사는 위에서 끝났으므로
+    # 여기서 한 번 더 건다 — 조합 파일은 FE 가 보낸 게 아니라 서버가 붙이는 것이라
+    # 합산이 조용히 상한을 넘을 수 있다.
+    wf_attachments: list[ChatAttachment] = []
+    if req.workflow_file_ids:
+        from src.persistence import get_workflow_files_repo
+
+        ids = [str(i) for i in req.workflow_file_ids][:_max_attachments()]
+        for f in get_workflow_files_repo().get_many(thread_id, ids):
+            if f.text:
+                wf_attachments.append(ChatAttachment(name=f.name, text=f.text))
+
+        total = (len(req.message)
+                 + sum(len(a.text) for a in (req.attachments or []))
+                 + sum(len(a.text) for a in wf_attachments))
+        total_limit = _max_total_input_chars()
+        if total > total_limit:
+            raise HTTPException(
+                status_code=422,
+                detail=(f"본문과 첨부를 합친 길이가 너무 깁니다({total:,}자, "
+                        f"상한 {total_limit:,}자). 이 단계의 파일 수를 줄여 주세요."))
+
     # AuthMiddleware 가 박은 서버 신뢰 신원 (dev bypass 시 None).
     user_id = getattr(request.state, "user_id", None)
 
@@ -217,14 +247,17 @@ async def chat(req: ChatRequest, request: Request):
         try:
             style = req.style if req.style in ("expert", "simple") else None
             confidential = bool(req.confidential)
+            hidden = bool(req.hidden)
             agen = run_chat_turn(
                 thread_id,
-                _compose_message(req.message, req.attachments),
+                _compose_message(req.message,
+                                 [*(req.attachments or []), *wf_attachments]),
                 user_id=user_id,
                 selected_law_keys=req.selected_law_keys,
                 model_name=model_name,
                 style=style,
                 confidential=confidential,
+                hidden=hidden,
                 skill_hint=req.skill_hint if req.skill_hint == "irb_drb" else None,
             ).__aiter__()
             while True:
@@ -285,12 +318,16 @@ def _owned_meta_or_404(
         raise HTTPException(status_code=404, detail="thread not found")
     user_id = getattr(request.state, "user_id", None)
     owner = meta.get("user_id")
-    if user_id is not None and owner is not None and str(owner) != str(user_id):
+    # 거부 기본값(2026-10-03). 종전 `user_id is not None and owner is not None and …`
+    # 는 AND 3조건이라 **하나만 비어도 통과**했다 — `owner` 없는(dev 생성) 스레드는
+    # 운영 사용자 전원이 열람, `NEXTAUTH_SECRET` 미설정이면 전 스레드 공개.
+    # 안전한 기본값은 "모르면 거부"다. dev bypass 는 user_id 를 채우므로 영향 없다.
+    if user_id is None or owner is None or str(owner) != str(user_id):
         raise HTTPException(status_code=404, detail="thread not found")  # 비노출
     return meta
 
 
-def _message_view(m) -> dict:
+def _message_view(m, *, hidden: bool = False) -> dict:
     """FE 렌더용 메시지 축약 — 구경로 values.messages 와 같은 판단 재료 제공."""
     from src.text.messages import content_text as _msg_text
 
@@ -299,6 +336,10 @@ def _message_view(m) -> dict:
         "type": getattr(m, "type", None),          # human | ai | tool
         "content": _msg_text(getattr(m, "content", None)),
     }
+    # 조합의 중간 단계(2026-10-02) — FE 가 기본 렌더에서 제외하고 "과정 보기"로만
+    # 펼친다. 메시지 객체에는 없는 정보라 state 응답에서 병렬로 실어 준다.
+    if hidden:
+        out["hidden"] = True
     tool_calls = getattr(m, "tool_calls", None) or []
     if tool_calls:
         out["tool_calls"] = [tc.get("name") for tc in tool_calls]
@@ -328,9 +369,164 @@ def list_chat_threads(request: Request, limit: int = 50):
     return {"threads": [
         {"thread_id": r["id"], "title": r.get("title"),
          "created_at": r.get("created_at"), "updated_at": r.get("updated_at"),
-         "pinned": bool(r.get("pinned"))}
+         "pinned": bool(r.get("pinned")),
+         # 스레드 종류(2026-10-02) — 사이드바가 「대화」와 「모니터링 대상」을
+         # 가르는 기준이다. 빠뜨리면 FE 필터가 **조용히 통과**해 모니터링 대상이
+         # 대화 목록에 섞인다(실측 버그).
+         "kind": r.get("kind") or "chat"}
         for r in rows
     ]}
+
+
+@router.patch("/chat/{thread_id}/kind")
+async def set_thread_kind(thread_id: str, request: Request):
+    """스레드 종류 전환 — 대화 ↔ 모니터링 대상 (2026-10-02).
+
+    body: {"kind": "chat" | "monitor"}
+
+    이미 대화로 모아 둔 인용이 그대로 관찰 후보가 되므로, 상담하다 "이건 계속
+    지켜봐야겠다" 싶을 때 새로 시작하지 않고 그 자리에서 바꾼다(사용자 제안).
+
+    되돌릴 때 **관찰 목록은 지우지 않는다** — 다시 모니터링으로 바꾸면 그대로
+    돌아온다. 전환은 분류 변경이지 삭제가 아니다.
+    """
+    meta = _owned_meta_or_404(thread_id, request)
+    body = await request.json()
+    kind = str(body.get("kind") or "").strip()
+    if kind not in ("chat", "monitor"):
+        raise HTTPException(status_code=422,
+                            detail="kind 는 'chat' 또는 'monitor' 여야 합니다")
+
+    from src.persistence.threads_repo import get_threads_repo
+
+    await asyncio.to_thread(get_threads_repo().set_kind, thread_id, kind)
+    _log.info("thread kind 전환 %s: %s → %s", thread_id,
+              meta.get("kind") or "chat", kind)
+    return {"ok": True, "thread_id": thread_id, "kind": kind}
+
+
+@router.patch("/chat/{thread_id}/workflow")
+async def set_thread_workflow(thread_id: str, request: Request):
+    """기능 조합 저장 (2026-10-02).
+
+    body: 조합 객체 그대로 — `{"steps":[{fn,values,files,confidential,done}],
+    "cursor":0,"mode":"stepwise"|"auto","status":"draft"}`. 구버전 문자열 배열도
+    받는다(`src.workflow` 가 승격). `steps` 가 비면 조합을 끝낸다.
+
+    **스레드에 둔다.** 조합은 입력·파일·기밀까지 들어 있는 작업 계획이라, 클라이언트
+    상태로만 들면 새로고침 한 번에 통째로 사라진다.
+    """
+    _owned_meta_or_404(thread_id, request)
+    body = await request.json()
+
+    from src.workflow import WorkflowError, normalize
+
+    if not isinstance(body.get("steps"), list):
+        raise HTTPException(status_code=422, detail="steps 는 배열이어야 합니다")
+    try:
+        wf = normalize(body)
+    except WorkflowError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+
+    from src.persistence.threads_repo import get_threads_repo
+
+    await asyncio.to_thread(get_threads_repo().set_workflow, thread_id, wf)
+    return {"ok": True, "thread_id": thread_id, "workflow": wf}
+
+
+@router.post("/chat/{thread_id}/workflow/suggest")
+async def suggest_workflow_values(thread_id: str, request: Request):
+    """다음 단계 입력값 제안 (2026-10-02).
+
+    body: `{"title": "판례 검색…", "fields": [{"key","label","placeholder"}]}`
+
+    "단계별 모드"의 핵심 — 앞 단계 산출을 읽어 다음 단계 폼을 **채워 놓는다**.
+    사용자는 처음부터 타이핑하지 않고 고치기만 하면 된다.
+
+    맥락은 **기밀이 아닌 ai 메시지 꼬리**만 쓴다. 기밀 단계 산출을 상용 모델에
+    넘기면 `_drop_sensitive` 로 막아 놓은 격리가 여기서 새어 나간다.
+    """
+    _owned_meta_or_404(thread_id, request)
+    body = await request.json()
+
+    fields = body.get("fields")
+    if not isinstance(fields, list) or not fields:
+        raise HTTPException(status_code=422, detail="fields 가 필요합니다")
+
+    from src.persistence.threads_repo import get_threads_repo
+
+    state = await asyncio.to_thread(get_threads_repo().get_state, thread_id)
+    flags = state.sensitive or []
+    parts: list[str] = []
+    for i, m in enumerate(state.messages):
+        if getattr(m, "type", None) != "ai":
+            continue
+        if i < len(flags) and flags[i]:
+            continue  # 기밀 산출은 제안에 쓰지 않는다
+        from src.text.messages import content_text as _msg_text
+
+        t = _msg_text(getattr(m, "content", None)).strip()
+        if len(t) > 80:  # 짧은 안내 발화 배제
+            parts.append(t)
+
+    from src.workflow import SUGGEST_CONTEXT_CHARS, suggest_values
+
+    context = "\n\n---\n\n".join(parts[-3:])[-SUGGEST_CONTEXT_CHARS:]
+    values = await suggest_values(
+        title=str(body.get("title") or ""), fields=fields, context=context)
+    return {"values": values}
+
+
+@router.post("/chat/{thread_id}/workflow/files")
+def upload_workflow_file(thread_id: str, request: Request,
+                         file: UploadFile = File(...)):
+    """조합 단계에 붙일 파일 — 추출해서 **스레드에 보관**한다 (2026-10-02).
+
+    채팅 첨부(`POST /files/extract`)와 달리 서버가 들고 있는다. 조합은 짜 놓고
+    나중에 돌리거나 새로고침 뒤 이어서 하므로, 프런트 메모리에만 두면 그때마다
+    파일을 다시 올려야 한다.
+
+    사건 파일이라 본문은 암호화해 저장한다(`workflow_files_repo`).
+
+    `def`(동기) 라우트다 — 파일 읽기·추출·DB 가 전부 동기 I/O 라 스레드풀에 맡긴다
+    (`tests/test_async_route_convention.py` 가 강제하는 규약).
+    """
+    _owned_meta_or_404(thread_id, request)
+
+    from src.file_extract import EmptyExtract, UnsupportedFileType, extract_text
+    from src.routes.files import _max_upload_bytes
+
+    limit = _max_upload_bytes()
+    data = file.file.read(limit + 1)
+    if len(data) > limit:
+        raise HTTPException(
+            status_code=413,
+            detail=f"파일이 너무 큽니다. {limit // (1024 * 1024)}MB 이하로 올려주세요.")
+    if not data:
+        raise HTTPException(status_code=422, detail="빈 파일입니다.")
+
+    name = (file.filename or "파일").strip()[:200]
+    try:
+        result = extract_text(name, data)
+    except UnsupportedFileType as e:
+        raise HTTPException(status_code=415, detail=str(e)) from e
+    except EmptyExtract as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+
+    from src.persistence import get_workflow_files_repo
+
+    f = get_workflow_files_repo().put(thread_id, name, result.text)
+    return {**f.as_meta(), "truncated": result.truncated}
+
+
+@router.delete("/chat/{thread_id}/workflow/files/{file_id}")
+def delete_workflow_file(thread_id: str, file_id: str, request: Request):
+    """조합 첨부 삭제 — 지우면 그 단계는 실행 불가로 돌아간다."""
+    _owned_meta_or_404(thread_id, request)
+
+    from src.persistence import get_workflow_files_repo
+
+    return {"ok": get_workflow_files_repo().delete(thread_id, file_id)}
 
 
 @router.get("/chat/search")
@@ -350,6 +546,7 @@ def search_chat_threads(request: Request, q: str = "", limit: int = 30):
         {"thread_id": r["id"], "title": r.get("title"),
          "created_at": r.get("created_at"), "updated_at": r.get("updated_at"),
          "pinned": bool(r.get("pinned")),
+         "kind": r.get("kind") or "chat",
          # 매칭 발췌 — 비슷한 제목이 여러 개일 때 어느 대화인지 고르는 근거.
          "match_snippet": r.get("match_snippet") or ""}
         for r in rows
@@ -431,11 +628,23 @@ def get_chat_state(thread_id: str, request: Request):
     return {
         "thread_id": thread_id,
         "title": meta.get("title"),
-        "messages": [_message_view(m) for m in state.messages],
+        "messages": [
+            _message_view(m, hidden=bool((state.hidden or [])[i])
+                          if i < len(state.hidden or []) else False)
+            for i, m in enumerate(state.messages)
+        ],
         "steps": state.steps,
         "selected_law_keys": state.selected_law_keys,
         # 진행 배지 — 폴링 중 FE 가 "보고서 작성 중" 유지(비차단 설계 유지).
         "report_running": is_report_running(thread_id),
+        # 이 스레드에 기밀 턴이 있었는가(2026-10-01). 기밀을 끄려 할 때 FE 가
+        # 경고하는 근거 — 저장된 이전 대화가 통째로 상용 모델로 간다.
+        "confidential_seen": bool(meta.get("confidential_seen")),
+        # 모니터링 스레드인가(2026-10-02) — FE 가 관찰 패널을 띄울 기준.
+        "kind": str(meta.get("kind") or "chat"),
+        # 진행 중인 기능 조합(2026-10-02) — 새로고침 후에도 "다음 단계" 카드가
+        # 같은 자리에 남아야 한다.
+        "workflow": get_threads_repo().get_workflow(thread_id),
     }
 
 
@@ -448,9 +657,34 @@ def delete_chat_thread(thread_id: str, request: Request):
 
     # 이 대화에서 만든 서식도 함께 지운다 — 보관(kept)한 것만 남는다(2026-09-18).
     docs = delete_thread_documents(thread_id)
+
+    # 모니터링 부속물도 같이 지운다(2026-10-02). 남겨 두면 감지 루프가 죽은
+    # 스레드를 계속 훑고, 알람 모아보기에 주인 없는 알람이 뜬다.
+    watch = alerts = wfiles = 0
+    try:
+        from src.persistence import get_monitor_alert_repo, get_monitor_watch_repo
+
+        watch = get_monitor_watch_repo().delete_thread(thread_id)
+        alerts = get_monitor_alert_repo().delete_thread(thread_id)
+    except Exception:  # noqa: BLE001 — 부속물 정리 실패가 삭제를 막으면 안 된다
+        _log.warning("모니터링 부속물 정리 실패 thread=%s", thread_id, exc_info=True)
+
+    # 조합 첨부(사건 파일 추출본)도 같이 지운다 — 대화를 지웠는데 사건 내용이
+    # DB 에 남아 있으면 안 된다.
+    try:
+        from src.persistence import get_workflow_files_repo
+
+        wfiles = get_workflow_files_repo().delete_thread(thread_id)
+    except Exception:  # noqa: BLE001
+        _log.warning("조합 첨부 정리 실패 thread=%s", thread_id, exc_info=True)
+
     get_threads_repo().delete_thread(thread_id)
+    _log.info("thread 삭제 %s (서식 %d · 관찰 %d · 알람 %d · 조합첨부 %d)",
+              thread_id, docs["deleted"], watch, alerts, wfiles)
     return {"ok": True, "thread_id": thread_id,
-            "documents_deleted": docs["deleted"], "documents_kept": docs["kept"]}
+            "documents_deleted": docs["deleted"], "documents_kept": docs["kept"],
+            "watch_deleted": watch, "alerts_deleted": alerts,
+            "workflow_files_deleted": wfiles}
 
 
 class ThreadPatch(BaseModel):
@@ -505,6 +739,17 @@ async def chat_auto_title(thread_id: str, request: Request):
 
     query = _msg_text(getattr(first_human, "content", None))[:500]
     title = ""
+
+    # 기밀 스레드는 **제목도 밖으로 내보내지 않는다**(2026-10-02).
+    #
+    # 종전엔 첫 질문 500자를 상용 TITLE_MODEL 로 보냈다 — 기밀 모드가 모든 대화를
+    # 원내로 돌리는 동안 제목 생성만 조용히 상용 API 로 빠져나가고 있었다. 사건
+    # 요지는 보통 첫 질문에 다 들어 있으므로 유출 범위가 작지 않다.
+    if bool((meta or {}).get("confidential_seen")):
+        title = query[:20] or "새 대화"
+        repo.set_title(thread_id, title)
+        return {"thread_id": thread_id, "title": title}
+
     try:
         from src.chat_loop import _base_model
 

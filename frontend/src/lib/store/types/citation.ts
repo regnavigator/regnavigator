@@ -63,6 +63,12 @@ export type Citation = {
   court?: string;
   /** R4 — 심급 (1=1심, 2=2심, 3=3심/최종) */
   instance?: 1 | 2 | 3;
+  /**
+   * 첨부 종별 — `"별표"` | `"서식"` (2026-10-01). 검색 API 가 알려주는 값이며,
+   * `doc_category`(`법령별표서식`)가 둘을 뭉뚱그리는 것을 가른다.
+   * 제목 추측(`formDocKind`)보다 **우선**한다 — 제목에 '별표'만 있는 서식이 흔하다.
+   */
+  attachment_subtype?: string | null;
   /** 별표/서식 HWP·PDF 다운로드 (law.go.kr). source_kind=doc + doc_category가 *별표서식*일 때만 박힘 */
   download_url?: string;
 };

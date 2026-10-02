@@ -17,6 +17,15 @@ import { useQueryState } from "nuqs";
 import { signOut, useSession } from "next-auth/react";
 import { toast } from "sonner";
 import {
+  createMonitorThread,
+  listMonitorThreads,
+  setThreadKind,
+  type MonitorThread,
+} from "@/lib/client/monitorThreads";
+
+/** 관찰·알람이 바뀌면 사이드바가 다시 읽게 하는 신호(2026-10-02). */
+export const MONITOR_CHANGED_EVENT = "regnav-monitor-changed";
+import {
   Dialog,
   DialogAction,
   DialogContent,
@@ -75,7 +84,11 @@ export function ThreadList({ configured, refreshKey, onError, onCollapse, onOpen
   const userEmail = (session?.user as { email?: string | null } | undefined)?.email ?? null;
   // admin 판별 — NextAuth session(ADMIN_EMAILS env 매칭) 또는 backend usage 응답 둘 중 하나면 OK.
   // backend가 is_admin 안 보내도 ADMIN_EMAILS만 박혀있으면 UI 노출됨.
-  const { mode, showPro } = useMode();
+  const { mode, showPro, setMode: switchMode } = useMode();
+  // 모드별 스코프(2026-10-02) — 모니터링 모드에선 모니터링 대상만,
+  // 일반·전문가에선 대화만 보인다. 모드를 바꿨는데 왼쪽이 그대로면
+  // "바뀐 게 없다"로 느껴진다(실사용 지적).
+  const isMonitorMode = mode === "monitor";
   const sessionIsAdmin = !!(session?.user as { isAdmin?: boolean } | undefined)?.isAdmin;
   const isAdmin = sessionIsAdmin || !!usage?.is_admin;
   const [threadId] = useQueryState("threadId");
@@ -245,8 +258,42 @@ export function ThreadList({ configured, refreshKey, onError, onCollapse, onOpen
       onError("먼저 설정에서 배포 URL과 Assistant ID를 입력하세요.");
       return;
     }
-    // thread는 첫 메시지 송신 시 lazy 생성 (PageShell.handleSend). 여기선 URL만 /new로 리셋.
+    // 모드 안에서는 **한 종류만** 만든다(2026-10-02). 모니터링 모드에서 이 버튼이
+    // 일반 대화를 만들면 "모니터링 대상 추가와 뭐가 다르냐"가 된다(실사용 지적).
+    if (mode === "monitor") {
+      try {
+        const r = await createMonitorThread();
+        window.dispatchEvent(new CustomEvent(MONITOR_CHANGED_EVENT));
+        router.push(`/new?threadId=${encodeURIComponent(r.thread_id)}`);
+      } catch {
+        onError("모니터링 대상을 만들지 못했습니다.");
+      }
+      return;
+    }
+    // 일반 대화는 첫 메시지 송신 시 lazy 생성 (PageShell.handleSend) — URL만 리셋.
     router.push("/new");
+  }
+
+  /** 대화 ↔ 모니터링 대상 전환(2026-10-02). 전환하면 그 모드로 따라간다. */
+  async function handleConvert(t: Thread) {
+    const toMonitor = (t.kind ?? "chat") !== "monitor";
+    try {
+      await setThreadKind(t.id, toMonitor ? "monitor" : "chat");
+      window.dispatchEvent(new CustomEvent(MONITOR_CHANGED_EVENT));
+      void reload(true);
+      if (toMonitor) {
+        switchMode("monitor");
+        toast.success("모니터링 대상으로 바꿨습니다.", {
+          description: "이 대화가 모은 근거를 관찰 목록에 담을 수 있습니다.",
+        });
+      } else {
+        toast.success("대화로 되돌렸습니다.", {
+          description: "관찰 목록은 지우지 않았습니다.",
+        });
+      }
+    } catch {
+      onError("종류를 바꾸지 못했습니다.");
+    }
   }
 
   function handleSelect(id: string) {
@@ -374,6 +421,35 @@ export function ThreadList({ configured, refreshKey, onError, onCollapse, onOpen
         ) : null}
       </div>
 
+      {/* 현재 모드 배지(2026-10-02) — 어디에 있는지 한눈에. 누르면 전환 화면. */}
+      <Link
+        href="/start?pick=1"
+        data-testid="mode-badge"
+        title="진입 경로 전환 — 일반 상담 / 전문가 업무 / 규제 모니터링"
+        className="group mx-2 mb-1 flex items-center gap-2 rounded-[10px] border border-md-outline-variant bg-md-surface-container-lowest px-2.5 py-2 transition-colors hover:border-md-primary"
+      >
+        <span
+          className="material-symbols-outlined text-[18px] text-md-primary"
+          aria-hidden
+        >
+          {mode ? MODE_META[mode].icon : "tune"}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-[9.5px] uppercase tracking-[0.1em] text-md-on-surface-variant">
+            현재 모드
+          </span>
+          <span className="block truncate text-[13px] font-semibold text-md-on-surface">
+            {mode ? MODE_META[mode].label : "모드 선택"}
+          </span>
+        </span>
+        <span
+          className="material-symbols-outlined text-[15px] text-md-on-surface-variant opacity-60 group-hover:opacity-100"
+          aria-hidden
+        >
+          swap_horiz
+        </span>
+      </Link>
+
       <button
         type="button"
         onClick={handleNewThread}
@@ -384,10 +460,10 @@ export function ThreadList({ configured, refreshKey, onError, onCollapse, onOpen
           className="material-symbols-outlined text-[22px] text-md-on-surface transition-colors group-hover:text-md-primary"
           aria-hidden
         >
-          edit_square
+          {mode === "monitor" ? "radar" : "edit_square"}
         </span>
         <span className="text-[15px] font-medium text-md-on-surface">
-          새 대화
+          {mode === "monitor" ? "새 모니터링 대상" : "새 대화"}
         </span>
       </button>
       </div>
@@ -397,7 +473,7 @@ export function ThreadList({ configured, refreshKey, onError, onCollapse, onOpen
           실측 피드백 2026-07-24). 넘치면 섹션 내부 스크롤. */}
       <div className="flex max-h-[200px] min-h-[64px] shrink-0 flex-col overflow-hidden pb-2">
         {/* 심층 보고서 — 전문가 전용(2026-10-01 모드 분기) */}
-        {showPro ? (
+        {showPro && !isMonitorMode ? (
         <ReportsSection
           reports={displayReports}
           onPreview={(r) => setPreviewReport(r)}
@@ -408,11 +484,19 @@ export function ThreadList({ configured, refreshKey, onError, onCollapse, onOpen
       {/* 작성한 서식 — 다시 열기·삭제(2026-09-18). 없으면 섹션 자체를 숨겨
           대화 목록 공간을 뺏지 않는다. */}
       {/* 작성한 서식 — 전문가 전용 */}
-      {showPro ? <DocumentsSection refreshKey={refreshKey} /> : null}
+      {showPro && !isMonitorMode ? <DocumentsSection refreshKey={refreshKey} /> : null}
 
 
-      {/* 채팅 목록 — 남은 공간 (flex-1) */}
-      <div className="flex flex-1 min-h-0 flex-col">
+      {/* 모니터링 스레드(2026-10-02) — 대화와 섞으면 알람이 묻힌다.
+          설계: backend/docs/spec/monitor-threads-design.md */}
+      {isMonitorMode ? <MonitorSection refreshKey={refreshKey} /> : null}
+
+      {/* 채팅 목록 — 남은 공간 (flex-1). 모니터링 모드에선 숨긴다(모드별 스코프). */}
+      <div
+        className={
+          "flex flex-1 min-h-0 flex-col " + (isMonitorMode ? "hidden" : "")
+        }
+      >
         <h3 className="px-3 pb-2 text-[11px] font-semibold text-md-on-surface-variant">
           대화
         </h3>
@@ -464,9 +548,13 @@ export function ThreadList({ configured, refreshKey, onError, onCollapse, onOpen
               // 평면 리스트 — 그룹 헤더("고정됨"·시간 그룹) 전부 제거(피드백
               // 2026-07-24: 세로 공간 절약, 고정은 행의 핀 하이라이트로 판별).
               // 정렬: 고정 먼저, 이후 최근순.
+              // 모니터링 스레드는 위 전용 섹션에만 — 두 곳에 같은 행이 뜨면 혼란이다.
+              const chatOnly = filteredThreads.filter(
+                (t) => (t.kind ?? "chat") !== "monitor",
+              );
               const flat = [
-                ...filteredThreads.filter((t) => t.pinned),
-                ...filteredThreads.filter((t) => !t.pinned),
+                ...chatOnly.filter((t) => t.pinned),
+                ...chatOnly.filter((t) => !t.pinned),
               ];
               return (
                 <ul className="flex flex-col">
@@ -484,6 +572,7 @@ export function ThreadList({ configured, refreshKey, onError, onCollapse, onOpen
                       onCommitRename={() => void commitRename()}
                       onRequestDelete={() => setPendingDelete(t)}
                       onTogglePin={() => void togglePin(t)}
+                      onConvert={() => void handleConvert(t)}
                     />
                   ))}
                 </ul>
@@ -531,36 +620,19 @@ export function ThreadList({ configured, refreshKey, onError, onCollapse, onOpen
           </span>
           저장한 근거
         </button>
-        {/* 현재 모드 표시 + 전환 — /start?pick=1 은 자동 이동 없이 선택 화면. */}
-        <Link
-          href="/start?pick=1"
-          title="진입 경로 전환 — 일반 상담 / 전문가 업무 / 규제 모니터링"
-          data-testid="mode-switch"
-          className="mb-1 flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-[12px] font-medium text-md-on-surface-variant transition-colors hover:bg-md-surface-container hover:text-md-on-surface"
-        >
-          <span className="material-symbols-outlined text-[15px]" aria-hidden>
-            {mode ? MODE_META[mode].icon : "tune"}
-          </span>
-          <span className="min-w-0 flex-1 truncate">
-            {mode ? `${MODE_META[mode].short} 모드` : "모드 선택"}
-          </span>
-          <span className="material-symbols-outlined text-[14px] opacity-60" aria-hidden>
-            swap_horiz
-          </span>
-        </Link>
-        {/* 고객사 규제 모니터링 — 저장한 근거를 폴더(고객사)별로 묶어 개정 감지·정기 리포트.
-            일반 상담 모드에서는 감춘다. */}
-        {showPro ? (
-        <Link
-          href="/monitor"
-          title="고객사별 규제 모니터링 — 개정 감지 리포트 설정"
-          className="mb-1 flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-[12px] font-medium text-md-on-surface-variant transition-colors hover:bg-md-surface-container hover:text-md-on-surface"
-        >
-          <span className="material-symbols-outlined text-[15px]" aria-hidden>
-            monitoring
-          </span>
-          고객사 모니터링
-        </Link>
+        {/* 구 폴더 기반 정기 배송 설정 — 모니터링 모드 안에서만 노출한다.
+            다른 모드에서 보이면 "모니터링이 두 군데"로 보인다(2026-10-02). */}
+        {isMonitorMode ? (
+          <Link
+            href="/monitor"
+            title="정기 리포트 배송 설정 (폴더 기반)"
+            className="mb-1 flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-[12px] font-medium text-md-on-surface-variant transition-colors hover:bg-md-surface-container hover:text-md-on-surface"
+          >
+            <span className="material-symbols-outlined text-[15px]" aria-hidden>
+              schedule_send
+            </span>
+            정기 리포트 배송 설정
+          </Link>
         ) : null}
         {/* 이용 안내 — 한 칸(2026-08-27 요청). 행 클릭=매뉴얼(/guide),
             오른쪽 나침반 아이콘=30초 화면 투어. */}
@@ -1152,6 +1224,8 @@ type RowProps = {
   onCommitRename: () => void;
   onRequestDelete: () => void;
   onTogglePin: () => void;
+  /** 종류 전환 — 대화 ↔ 모니터링 대상(2026-10-02) */
+  onConvert?: () => void;
 };
 
 function ThreadRow({
@@ -1166,6 +1240,7 @@ function ThreadRow({
   onCommitRename,
   onRequestDelete,
   onTogglePin,
+  onConvert,
 }: RowProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -1259,6 +1334,8 @@ function ThreadRow({
           onTogglePin={onTogglePin}
           onStartRename={onStartRename}
           onRequestDelete={onRequestDelete}
+          onConvert={onConvert}
+          isMonitor={(thread.kind ?? "chat") === "monitor"}
         />
       ) : null}
     </li>
@@ -1277,11 +1354,16 @@ function RowMenu({
   onTogglePin,
   onStartRename,
   onRequestDelete,
+  onConvert,
+  isMonitor,
 }: {
   pinned?: boolean;
   onTogglePin: () => void;
   onStartRename: () => void;
   onRequestDelete: () => void;
+  /** 종류 전환 — 대화 ↔ 모니터링 대상(2026-10-02) */
+  onConvert?: () => void;
+  isMonitor?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -1356,6 +1438,15 @@ function RowMenu({
         >
           {item("keep", pinned ? "고정 해제" : "상단 고정", onTogglePin)}
           {item("edit", "이름 변경", onStartRename)}
+          {/* 종류 전환(2026-10-02) — 이미 모은 인용이 그대로 관찰 후보가 되므로
+              새로 시작할 이유가 없다. */}
+          {onConvert
+            ? item(
+                isMonitor ? "chat_bubble" : "radar",
+                isMonitor ? "대화로 되돌리기" : "모니터링 대상으로",
+                onConvert,
+              )
+            : null}
           {item("delete", "삭제", onRequestDelete, true)}
         </div>
       ) : null}
@@ -1422,4 +1513,240 @@ function formatRelativeTime(ms: number): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
     d.getDate(),
   ).padStart(2, "0")}`;
+}
+
+/**
+ * MonitorSection — 사이드바의 모니터링 스레드 섹션 (2026-10-02).
+ *
+ * 대화와 섞으면 알람이 묻힌다. 관찰 건수와 **미읽음 알람 배지**를 행에 달아,
+ * 열어 보지 않아도 무엇이 바뀌었는지 보이게 한다.
+ */
+function MonitorSection({ refreshKey }: { refreshKey: number }) {
+  const router = useRouter();
+  const [rows, setRows] = useState<MonitorThread[]>([]);
+  const [open, setOpen] = useState(true);
+  const [busy, setBusy] = useState(false);
+  /** 삭제 확인 대기 중인 대상 — 되돌릴 수 없으므로 확인을 받는다. */
+  const [pendingDelete, setPendingDelete] = useState<MonitorThread | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      setRows((await listMonitorThreads()).threads);
+    } catch {
+      setRows([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load, refreshKey]);
+
+  useEffect(() => {
+    const h = () => void load();
+    window.addEventListener(MONITOR_CHANGED_EVENT, h);
+    return () => window.removeEventListener(MONITOR_CHANGED_EVENT, h);
+  }, [load]);
+
+  const unreadTotal = rows.reduce((n, r) => n + r.unread_alerts, 0);
+
+  const confirmDelete = useCallback(async () => {
+    const t = pendingDelete;
+    if (!t || busy) return;
+    setBusy(true);
+    try {
+      const r = await deleteThread(t.id);
+      setPendingDelete(null);
+      await load();
+      window.dispatchEvent(new CustomEvent(MONITOR_CHANGED_EVENT));
+      toast.success(`'${t.title || "새 모니터링"}'을 삭제했습니다.`, {
+        description:
+          r.watch_deleted || r.alerts_deleted
+            ? `관찰 ${r.watch_deleted}건 · 알람 ${r.alerts_deleted}건도 함께 지웠습니다.`
+            : undefined,
+      });
+    } catch {
+      toast.error("삭제하지 못했습니다.");
+    } finally {
+      setBusy(false);
+    }
+  }, [pendingDelete, busy, load]);
+
+  const create = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const r = await createMonitorThread();
+      await load();
+      router.push(`/new?threadId=${encodeURIComponent(r.thread_id)}`);
+    } catch {
+      toast.error("모니터링 대상을 만들지 못했습니다.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mb-2 flex flex-col" data-testid="monitor-section">
+      <div className="flex items-center gap-1 px-3 pb-1.5">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="flex flex-1 items-center gap-1 text-left text-[11px] font-semibold text-md-on-surface-variant"
+        >
+          <span
+            className="material-symbols-outlined text-[14px] transition-transform"
+            style={{ transform: open ? "none" : "rotate(-90deg)" }}
+            aria-hidden
+          >
+            expand_more
+          </span>
+          규제 모니터링
+          {unreadTotal > 0 ? (
+            <span
+              data-testid="monitor-unread-total"
+              className="ml-1 rounded-pill bg-md-error px-1.5 text-[10px] font-semibold text-md-on-error"
+            >
+              {unreadTotal}
+            </span>
+          ) : null}
+        </button>
+        <Link
+          href="/alerts"
+          title="알람 모아보기"
+          className="material-symbols-outlined text-[15px] text-md-on-surface-variant hover:text-md-primary"
+        >
+          notifications
+        </Link>
+        <Link
+          href="/monitor"
+          title="정기 리포트 배송 설정"
+          className="material-symbols-outlined text-[15px] text-md-on-surface-variant hover:text-md-primary"
+        >
+          schedule_send
+        </Link>
+        <button
+          type="button"
+          data-testid="monitor-new"
+          onClick={() => void create()}
+          disabled={busy}
+          title="모니터링 대상 추가"
+          className="material-symbols-outlined text-[15px] text-md-on-surface-variant hover:text-md-primary disabled:opacity-40"
+        >
+          add
+        </button>
+      </div>
+
+      {open ? (
+        rows.length === 0 ? (
+          <p className="px-3 pb-2 text-[11px] leading-snug text-md-on-surface-variant/80">
+            대상이 없습니다. <b>+</b>로 만들고, 대화로 규제를 찾아 담으세요.
+          </p>
+        ) : (
+          <ul className="flex flex-col">
+            {rows.map((t) => (
+              <li
+                key={t.id}
+                className="group flex items-center transition-colors hover:bg-md-surface-container-low"
+              >
+                <Link
+                  href={`/new?threadId=${encodeURIComponent(t.id)}`}
+                  data-monitor-thread={t.id}
+                  className="flex min-w-0 flex-1 items-center gap-2 py-1.5 pl-3 text-[12.5px] text-md-on-surface"
+                >
+                  <span className="min-w-0 flex-1 truncate">
+                    {t.title || "새 모니터링"}
+                  </span>
+                  <span className="shrink-0 text-[10.5px] text-md-on-surface-variant">
+                    {t.watch_count}
+                  </span>
+                  {t.unread_alerts > 0 ? (
+                    <span className="shrink-0 rounded-pill bg-md-error px-1.5 text-[10px] font-semibold text-md-on-error">
+                      {t.unread_alerts}
+                    </span>
+                  ) : null}
+                </Link>
+                {/* 삭제(2026-10-02) — 관찰·알람까지 함께 지워진다. 되돌릴 수 없으므로
+                    무엇이 사라지는지 건수로 보여 주고 확인을 받는다. */}
+                <button
+                  type="button"
+                  data-monitor-delete={t.id}
+                  aria-label={`${t.title || "새 모니터링"} 삭제`}
+                  title="모니터링 대상 삭제"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setPendingDelete(t);
+                  }}
+                  className="mr-2 inline-flex size-6 shrink-0 items-center justify-center rounded text-md-on-surface-variant opacity-0 transition-opacity hover:bg-md-surface-container hover:text-md-error focus-visible:opacity-100 group-hover:opacity-100"
+                >
+                  <span className="material-symbols-outlined text-[15px]" aria-hidden>
+                    delete
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )
+      ) : null}
+
+      {/* 삭제 확인 — 관찰 목록과 알람이 같이 사라진다. 되돌릴 수 없으므로
+          무엇이 지워지는지 **건수로** 보여 주고 받는다(2026-10-02). */}
+      <Dialog
+        open={!!pendingDelete}
+        onOpenChange={(o) => {
+          if (!o) setPendingDelete(null);
+        }}
+      >
+        <DialogContent className="max-w-[420px]" data-testid="monitor-delete-confirm">
+          <DialogHeader>
+            <div className="flex items-center gap-3">
+              <span
+                aria-hidden
+                className="inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-md-error-container text-md-error"
+              >
+                <span className="material-symbols-outlined text-[20px]">delete</span>
+              </span>
+              <DialogTitle>모니터링 대상 삭제</DialogTitle>
+            </div>
+            {pendingDelete ? (
+              <div className="mt-2.5 space-y-1 text-body-sm leading-[1.6] text-md-on-surface-variant">
+                <p>
+                  <span className="font-medium text-md-on-surface">
+                    &ldquo;{pendingDelete.title || "새 모니터링"}&rdquo;
+                  </span>
+                  을 삭제할까요?
+                </p>
+                <p>
+                  대화 내용과 함께{" "}
+                  <b>관찰 조문 {pendingDelete.watch_count}건</b>
+                  {pendingDelete.unread_alerts > 0 ? (
+                    <>
+                      , <b>읽지 않은 알람 {pendingDelete.unread_alerts}건</b>
+                    </>
+                  ) : null}
+                  이 지워집니다. <b>되돌릴 수 없습니다.</b>
+                </p>
+                <p className="text-[12px] opacity-80">
+                  대상을 남기고 추적만 멈추려면 삭제 대신{" "}
+                  <b>대화로 되돌리기</b>를 쓰세요 — 관찰 목록이 보존됩니다.
+                </p>
+              </div>
+            ) : null}
+          </DialogHeader>
+          <DialogFooter>
+            <DialogAction variant="secondary" onClick={() => setPendingDelete(null)}>
+              취소
+            </DialogAction>
+            <DialogAction
+              variant="destructive"
+              data-testid="monitor-delete-confirm-btn"
+              onClick={() => void confirmDelete()}
+            >
+              삭제
+            </DialogAction>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
 }

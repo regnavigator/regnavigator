@@ -1,6 +1,6 @@
-"""고객사별 규제 모니터링 리포트 — 수집·렌더·발송.
+"""대상별 규제 모니터링 리포트 — 수집·렌더·발송.
 
-로펌이 고객사(=`bookmarks.folder`)별로 관심 조문을 모아 두면, 그 폴더의 **폐지·
+로펌이 대상(=`bookmarks.folder`)별로 관심 조문을 모아 두면, 그 폴더의 **폐지·
 개정예정·시행일 변경**을 감지해 지정 수신자에게 정기 리포트를 보낸다(2026-10-01).
 
 판정은 `src/amendments.py` 를 그대로 쓴다 — 개인 조회(`GET /bookmarks/amendments`)와
@@ -241,7 +241,7 @@ def _emit_event(target, result: dict, data: dict) -> None:
             id="", ts=datetime.now(timezone.utc).isoformat(timespec="seconds"),
             event_type="monitor_report", user_id=target.user_id,
             payload_json=_json.dumps({
-                # 고객사명(folder)은 싣지 않는다 — 로펌 고객사 식별정보를 이벤트
+                # 대상명(folder)은 싣지 않는다 — 로펌 대상 식별정보를 이벤트
                 # 로그에 중복 보관하지 않기 위함. 필요하면 target_id 로 역참조한다.
                 "target_id": target.id, "cadence": target.cadence,
                 "changes": result.get("changes"), "counts": data.get("counts"),
@@ -314,7 +314,7 @@ def run_due(now: Optional[datetime] = None) -> list[dict]:
             continue
         try:
             r = send(t)
-        except Exception:  # noqa: BLE001 — 한 고객사 실패가 나머지를 막지 않게
+        except Exception:  # noqa: BLE001 — 한 대상 실패가 나머지를 막지 않게
             _log.exception("[monitor_report] target=%s 발송 실패", t.id)
             continue
         # 변경 0건으로 생략한 경우에도 '이번 주기는 처리됨'으로 표시해 반복 점검을 막는다.
@@ -332,3 +332,87 @@ def run_due(now: Optional[datetime] = None) -> list[dict]:
                          t.folder, r.get("failed"))
         results.append(r)
     return results
+
+
+# ── 스레드별 짧은 보고서 (2026-10-02) ───────────────────────────────────────
+#
+# 정기 리포트(`build`/`send`)와 **별개 경로**다. 정기는 "일정대로", 이건 "지금
+# 필요해서". 짧게 쓴다 — 변경된 것만, 하나당 두세 줄. 길면 안 읽는다.
+
+_ALERT_LABEL = {
+    "repealed": "폐지",
+    "pending": "개정예정",
+    "amended": "시행일 변경",
+    "effective_date": "시행일 변경",
+}
+
+
+def render_alert_report(*, title: str, alerts: list[dict], watch_count: int,
+                        since: Optional[str] = None) -> str:
+    """알람 → 마크다운 보고서. 의견서와 같은 문서 패널에서 열린다."""
+    from datetime import datetime as _dt
+
+    today = _dt.now(_kst()).strftime("%Y-%m-%d")
+    out = [f"# {title}", "",
+           f"- 작성일: {today}",
+           f"- 관찰 조문: {watch_count}건",
+           f"- 대상 기간: {since or '전체'}",
+           f"- 감지된 변경: **{len(alerts)}건**", ""]
+
+    if not alerts:
+        out += ["## 요약", "",
+                "대상 기간에 감지된 변경이 없습니다.", "",
+                "_변경이 없다는 것과 확인하지 못했다는 것은 다릅니다. "
+                "법령 DB 조회가 불가했던 기간이 있으면 그 구간은 알람이 "
+                "생성되지 않습니다._", ""]
+        return "\n".join(out) + "\n"
+
+    by_kind: dict[str, list[dict]] = {}
+    for a in alerts:
+        by_kind.setdefault(str(a.get("kind") or "amended"), []).append(a)
+
+    out += ["## 요약", ""]
+    for k, items in by_kind.items():
+        out.append(f"- {_ALERT_LABEL.get(k, k)}: {len(items)}건")
+    out.append("")
+
+    out += ["## 변경 내역", ""]
+    for k, items in by_kind.items():
+        out += [f"### {_ALERT_LABEL.get(k, k)}", ""]
+        for a in items:
+            p = a.get("payload") or {}
+            line = f"- **{p.get('title') or a.get('article_key')}**"
+            out.append(line)
+            out.append(f"  - 감지: {a.get('detected_at')}")
+            if p.get("current_date"):
+                out.append(f"  - 변경된 시행일: {p['current_date']}")
+            if p.get("saved_date"):
+                out.append(f"  - 저장 시점 시행일: {p['saved_date']}")
+            out.append(f"  - 조문 키: `{a.get('article_key')}`")
+        out.append("")
+
+    out += ["---", "",
+            "_본 보고서는 등록된 관찰 조문의 변경만 담습니다. "
+            "관찰하지 않는 법령의 변경은 포함되지 않습니다._", ""]
+    return "\n".join(out) + "\n"
+
+
+def send_markdown_report(subject: str, markdown: str,
+                         recipients: list[str]) -> bool:
+    """짧은 보고서를 메일로. SMTP 미설정이면 False (조용히 성공하지 않는다)."""
+    from src.observability.notifications import is_configured, send_email
+
+    if not is_configured():
+        _log.warning("SMTP 미설정 — 보고서 발송 생략")
+        return False
+    # 마크다운을 최소 HTML 로 — 전용 템플릿까지는 필요 없다.
+    html = "<pre style=\"font-family:ui-monospace,monospace;white-space:pre-wrap\">" \
+           + (markdown.replace("&", "&amp;").replace("<", "&lt;")) + "</pre>"
+    ok = True
+    for to in recipients:
+        try:
+            send_email(to, f"[규제 모니터링] {subject}", html)
+        except Exception:  # noqa: BLE001 — 한 명 실패가 전체를 막지 않는다
+            _log.warning("보고서 발송 실패 to=%s", to, exc_info=True)
+            ok = False
+    return ok

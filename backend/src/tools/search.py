@@ -268,6 +268,8 @@ class QdrantCore(NamedTuple):
     qdrant_keys: list[str]
     pg_meta_by_key: dict[str, dict]
     qdrant_by_key: dict[str, object]
+    #: 출처 적합성 필터가 제외한 것들 — events 적재·되묻기 판단용(2026-10-02)
+    filtered_out: list[dict] = []
 
 
 # ─── 종별 단서 보충 검색 ─────────────────────────────────────────────────
@@ -377,6 +379,17 @@ def run_qdrant(query: str, *, top_k: int | None = None,
             f"내부 자료 검색 일시 실패 ({type(e).__name__}). 잠시 후 다시 시도해주세요."
         ) from e
 
+    # 출처 적합성 필터(2026-10-02) — **인용 번호를 매기기 전**에 거른다.
+    # 번호가 붙은 뒤에 빼면 본문 [n] 과 참고문헌이 어긋나고, 모델에게 준 뒤에
+    # 빼면 이미 답변에 쓰인 뒤다. 의미는 닮았지만 적용되지 않는 법령을 막는다.
+    from src import source_filter
+
+    hits, filtered_out = source_filter.apply(query, hits)
+    if filtered_out:
+        _log.info("source_filter: %d건 제외 (%s)", len(filtered_out),
+                  ", ".join(sorted({d["reason"].split("(")[0]
+                                    for d in filtered_out})))
+
     # article 단위 GROUP BY 는 서버가 이미 수행 — dedup 만 방어적으로.
     qdrant_keys: list[str] = []
     qdrant_by_key: dict[str, dict] = {}
@@ -395,6 +408,7 @@ def run_qdrant(query: str, *, top_k: int | None = None,
     return QdrantCore(
         built=built, final_keys=qdrant_keys, qdrant_keys=qdrant_keys,
         pg_meta_by_key={}, qdrant_by_key=qdrant_by_key,
+        filtered_out=filtered_out,
     )
 
 
@@ -490,7 +504,14 @@ def _format_rag_hits(numbered: list[tuple[int, object, dict | None]]) -> str:
         )
         # pinned=PG full_text, normal=API snippet. 별표/서식(attachment)은 표·서식
         # 본문이라 조문(300)보다 크게 실어 모델이 실제 내용을 보게 한다.
-        _cap = 1200 if (p.get("chunk_type") or "article") == "attachment" else 300
+        #
+        # 판례도 넓힌다(2026-10-02). 판례 chunk 는 사건명·판시사항·판결요지가
+        # 한 덩어리라 300자면 사건명에서 잘려 **쟁점이 안 보인다** — 판례를 모아
+        # 핵심 이슈를 정리하는 작업이 성립하지 않는다. 전문은 어차피 못 받으므로
+        # (`/articles/bodies` 는 보고서 경로 전용) 요지만이라도 보게 한다.
+        _ct = p.get("chunk_type") or "article"
+        _tt = meta.get("target_type") or p.get("target_type") or ""
+        _cap = 1200 if _ct == "attachment" else (900 if _tt == "prec" else 300)
         text = (meta.get("full_text") or p.get("snippet") or p.get("full_text") or "")[:_cap]
         # 시행 상태 — **현행이 아닌 것만** 표기(2026-08-16). 종전엔 모델이 제목+본문만
         # 봐서 시행 예정·폐지 조문을 현행처럼 단정했다(규제 상담에서 답의 유효성

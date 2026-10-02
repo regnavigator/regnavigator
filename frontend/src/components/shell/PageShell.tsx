@@ -9,10 +9,11 @@
  * - RightPanel은 ?citation= 또는 ?docPath= 셋 시에만 마운트.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { usePathname, useRouter } from "next/navigation";
 import { useQueryState } from "nuqs";
+import { toast } from "sonner";
 import { InlineErrorBanner } from "@/components/shell/InlineErrorBanner";
 import { SettingsDialog } from "@/components/settings/SettingsDialog";
 import { ThreadList } from "@/components/thread/ThreadList";
@@ -30,9 +31,14 @@ import { PatchNotesPrompt } from "@/components/shell/PatchNotesPrompt";
 import { UserNoticePrompt } from "@/components/shell/UserNoticePrompt";
 import { RightPanel, useRightPanelMode } from "@/components/panel/RightPanel";
 import { DocumentPanel } from "@/components/panel/DocumentPanel";
+import { BriefPanel } from "@/components/panel/BriefPanel";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { RightPanelProvider, useRightPanel } from "@/lib/store/rightPanel";
 import { SavedCitationsProvider } from "@/lib/store/savedCitations";
+import {
+  useWatchedCitations,
+  WatchedCitationsProvider,
+} from "@/lib/store/watchedCitations";
 import {
   isConfigured,
   isDummyMode,
@@ -46,23 +52,45 @@ import {
 import { useChatState } from "@/lib/store/useChatState";
 import { articleKeyFromCitation } from "@/lib/client/article";
 import type { ChatAttachmentPayload } from "@/lib/store/turns";
+import type { Citation } from "@/lib/store/types";
 import { useUsage } from "@/lib/store/useUsage";
 import { useIsNarrow } from "@/lib/useIsNarrow";
 import { useMode } from "@/components/providers/ModeProvider";
+import {
+  adoptConfidential,
+  autoEnableConfidential,
+  OPEN_BRIEF_EVENT,
+  OPEN_WATCH_EVENT,
+  setConfidential,
+} from "@/lib/store/mode";
+import { MonitorWorkDialog } from "@/components/monitor/MonitorWorkDialog";
+import { WATCH_CHANGED_EVENT } from "@/components/monitor/WatchPanel";
+import { addWatch, listWatch, removeWatch } from "@/lib/client/monitorThreads";
 import type { ChatState } from "@/lib/store/types";
+import { featuresFor } from "@/lib/features/catalog";
+import { CompositionPanel } from "@/components/panel/CompositionPanel";
+import {
+  saveComposition,
+  stepMessage,
+  suggestValues,
+  synthesisMessage,
+  type Composition,
+} from "@/lib/features/composition";
 
 export function PageShell() {
   return (
     <RightPanelProvider>
       <SavedCitationsProvider>
-        <PageShellInner />
+        <WatchedCitationsProvider>
+          <PageShellInner />
+        </WatchedCitationsProvider>
       </SavedCitationsProvider>
     </RightPanelProvider>
   );
 }
 
 function PageShellInner() {
-  const { showPro } = useMode();   // 서식 작성은 전문가 경로 전용
+  const { mode, showPro } = useMode();   // 서식 작성은 전문가 경로 전용
   const isNarrow = useIsNarrow();
   const [threadsOpen, setThreadsOpen] = useState(true);
   const narrowInitRef = useRef(false);
@@ -87,6 +115,7 @@ function PageShellInner() {
     setCitation,
     setDocPath,
     setDocumentId,
+    setComposer,
   } = useRightPanel();
   // 404 stale thread (backend 재시작·삭제) → `/new` 으로 이동 → EmptyHero로 복귀.
   const chat = useChatState(threadId, {
@@ -96,6 +125,158 @@ function PageShellInner() {
     }, [router]),
   });
   const rightMode = useRightPanelMode(chat.state, chat.isRunning, chat.reportRunning);
+
+  /* ───────────── 기능 조합 — 전문가 모드 전용 (2026-10-02) ─────────────
+   *
+   * 일반 상담에는 두지 않는다. 일반인 모드는 "그냥 물어보면 답한다"가 전부여야
+   * 하고, 기능과 조합은 전문가 모드의 차별점이다.
+   *
+   * 실행 모델: 각 단계는 **숨은 턴**으로 돌고 마지막에 종합 1건만 보인다.
+   * 단계마다 답을 쏟으면 읽을 수 없는 대화가 된다.
+   *   - 단계별: 한 단계가 끝나면 다음 입력을 채워 놓고 멈춘다(사람이 검토)
+   *   - 한번에: 채우고 바로 진행해 끝까지 간다
+   */
+  const [composition, setComposition] = useState<Composition | null>(null);
+  const [composing, setComposing] = useState(false);
+  const stopRef = useRef(false);
+  // 루프 안에서 최신 실행 상태를 읽어야 한다 — 클로저에 갇힌 값은 영원히 true 다.
+  const chatRunningRef = useRef(false);
+  chatRunningRef.current = chat.isRunning;
+
+  // 서버가 진실원 — 스레드가 바뀌거나 새로고침하면 그 값으로 맞춘다.
+  const compServer = (chat.state.workflow as Composition | null) ?? null;
+  useEffect(() => {
+    setComposition(compServer);
+  }, [compServer, threadId]);
+
+  const composerThreadRef = useRef(false);
+
+  /**
+   * 조합 탭 열기 — **스레드를 먼저 만든다**.
+   *
+   * 조합은 단계별 파일을 스레드에 보관하므로 thread 없이는 파일을 올릴 수도,
+   * 실행할 수도 없다. 채팅은 첫 메시지에서 lazy 생성하지만 조합은 그 전에
+   * 필요하다 — 열자마자 만든다.
+   */
+  const openComposer = useCallback(async () => {
+    setComposer(true);
+    setRpOpen(true);
+    if (threadId || composerThreadRef.current) return;
+    composerThreadRef.current = true;
+    try {
+      const t = await createThread();
+      adoptConfidential(t.id);
+      router.replace(`/new?threadId=${t.id}`);
+      window.dispatchEvent(new Event(THREAD_LIST_CHANGED_EVENT));
+    } catch {
+      toast.error("새 대화를 만들지 못했습니다.");
+    } finally {
+      composerThreadRef.current = false;
+    }
+  }, [setComposer, setRpOpen, threadId, router]);
+
+  const persistComposition = useCallback(
+    async (c: Composition | null) => {
+      setComposition(c);
+      if (!threadId) return;
+      try {
+        await saveComposition(threadId, c ?? { steps: [], cursor: 0,
+                                               mode: "stepwise", status: "draft" });
+      } catch {
+        toast.error("조합을 저장하지 못했습니다.");
+      }
+    },
+    [threadId],
+  );
+
+  /** 한 턴이 끝날 때까지 기다린다 — 단일 워커라 어차피 직렬이다. */
+  const waitIdle = useCallback(async () => {
+    for (let i = 0; i < 600; i++) {
+      await new Promise((r) => setTimeout(r, 500));
+      if (!chatRunningRef.current) return true;
+      if (stopRef.current) return false;
+    }
+    return false;
+  }, []);
+
+  const runComposition = useCallback(
+    async (runMode: "stepwise" | "auto") => {
+      const tid = threadId;
+      const c = composition;
+      if (!tid || !c || !c.steps.length || composing) return;
+
+      const all = featuresFor({ mode, hasTurns: true });
+      const byId = new Map(all.map((f) => [f.id, f]));
+
+      setComposing(true);
+      stopRef.current = false;
+      let cur = c.cursor >= c.steps.length ? 0 : c.cursor;
+      let steps = c.steps.slice();
+
+      try {
+        while (cur < steps.length) {
+          if (stopRef.current) break;
+          const st = steps[cur]!;
+          const f = byId.get(st.fn);
+          if (!f) {
+            cur += 1;
+            continue;
+          }
+
+          // 단계 = 숨은 턴. 기밀은 **이 단계의 값**을 쓴다(전역 토글 아님).
+          await chat.send(stepMessage(f, st, cur), {
+            hidden: true,
+            confidential: st.confidential,
+            workflowFileIds: st.files.map((x) => x.id),
+          });
+          const ok = await waitIdle();
+          if (!ok) break;
+
+          steps = steps.map((x, i) => (i === cur ? { ...x, done: true } : x));
+          cur += 1;
+          await persistComposition({ ...c, steps, cursor: cur, mode: runMode,
+                                     status: cur >= steps.length ? "done" : "running" });
+
+          // 다음 단계 입력을 채워 둔다 — 두 모드가 공통으로 하는 일이다.
+          if (cur < steps.length) {
+            const nf = byId.get(steps[cur]!.fn);
+            if (nf?.form) {
+              const vals = await suggestValues(
+                tid, nf.title,
+                nf.form.fields.map((fd) => ({
+                  key: fd.key, label: fd.label, placeholder: fd.placeholder,
+                })),
+              );
+              if (Object.keys(vals).length) {
+                steps = steps.map((x, i) =>
+                  i === cur ? { ...x, values: { ...vals, ...x.values } } : x);
+                await persistComposition({ ...c, steps, cursor: cur,
+                                           mode: runMode, status: "running" });
+              }
+            }
+            // 단계별 모드는 여기서 멈춘다 — 사람이 보고 고친 뒤 다시 누른다.
+            if (runMode === "stepwise") return;
+          }
+        }
+
+        // 종합 — 이것만 화면에 보인다.
+        if (!stopRef.current && cur >= steps.length) {
+          const titles = steps
+            .map((x) => byId.get(x.fn)?.title)
+            .filter((t): t is string => !!t);
+          // 기밀 단계가 하나라도 있었으면 종합도 원내에서 한다 — 종합은 그
+          // 내용을 읽어야 하므로, 상용으로 보내면 격리가 여기서 무너진다.
+          const anyConf = steps.some((x) => x.confidential);
+          await chat.send(synthesisMessage(titles), { confidential: anyConf });
+        }
+      } finally {
+        setComposing(false);
+      }
+    },
+    [threadId, composition, composing, mode, chat, waitIdle, persistComposition],
+  );
+
+
 
   // 스레드 전환 시 이전 대화에서 클릭한 citation/docPath 를 클리어. 안 그러면 스토어에
   // 남은 값 때문에 useRightPanelMode 가 "side" 를 반환해, 인용 없는 *새 대화*에서도
@@ -139,15 +320,85 @@ function PageShellInner() {
   // 2026-08-26 최초 구현은 심층 보고서 파이프라인을 태워서, 서식을 눌렀는데
   // "심층 보고서 생성 중"이 뜨고 수십 분을 기다려야 했다(실사용 지적).
   // 기입 항목은 서식 자체에서 나오므로 LLM 없이 몇 초면 화면이 열린다.
+  // 인용 패널에서 바로 관찰 목록에 담기(2026-10-02). 모니터링 스레드에서만
+  // 전달한다 — 일반 대화에는 담을 목록 자체가 없다.
+  const { keys: watchedKeys, setKeys: setWatchedKeys } = useWatchedCitations();
+  const isMonitorThread = chat.state.kind === "monitor";
+
+  const reloadWatched = useCallback(async () => {
+    const tid = threadId;
+    if (!tid || !isMonitorThread) {
+      setWatchedKeys(new Set());
+      return;
+    }
+    try {
+      const r = await listWatch(tid);
+      setWatchedKeys(new Set(r.items.map((i) => i.article_key)));
+    } catch {
+      /* 실패해도 버튼은 '관찰' 상태로 보인다 — 담으면 서버가 중복을 흡수한다 */
+    }
+  }, [threadId, isMonitorThread, setWatchedKeys]);
+
+  useEffect(() => {
+    void reloadWatched();
+  }, [reloadWatched]);
+
+  const watchApi = useMemo(() => {
+    const tid = threadId;
+    if (!tid || !isMonitorThread) return undefined;
+    const sync = () => {
+      void reloadWatched();
+      window.dispatchEvent(new CustomEvent(WATCH_CHANGED_EVENT));
+    };
+    return {
+      has: (ak: string) => watchedKeys.has(ak),
+      add: (c: Citation) => {
+        void addWatch(tid, [c], "user")
+          .then((r) => {
+            if (r.added.length) {
+              toast.success("관찰 목록에 담았습니다.", {
+                description: "이 조문의 개정·폐지를 추적합니다.",
+              });
+            } else {
+              toast.error("이 인용은 관찰할 수 없습니다.", {
+                description: "조문 키가 없는 자료(웹 등)는 개정을 추적할 수 없습니다.",
+              });
+            }
+            sync();
+          })
+          .catch(() => toast.error("담지 못했습니다."));
+      },
+      remove: (ak: string) => {
+        void removeWatch(tid, ak)
+          .then(() => {
+            toast.success("관찰 목록에서 뺐습니다.");
+            sync();
+          })
+          .catch(() => toast.error("빼지 못했습니다."));
+      },
+    };
+  }, [threadId, isMonitorThread, watchedKeys, reloadWatched]);
+
   const handleUseAsForm = useCallback(
     (articleKey: string, title: string) => {
+      // 서식에는 신청인·사업장·주민등록번호 등 개인정보가 들어간다 —
+      // 작성에 들어가는 순간 기밀 모드를 켠다(2026-10-01). 끌 수는 있다.
+      if (autoEnableConfidential(mode, threadId)) {
+        toast.info(
+          "서식 작성을 시작해 기밀 모드를 켰습니다 — 입력 내용은 원내 모델로만 처리되고 개인정보는 마스킹됩니다.",
+          {
+            duration: 8000,
+            action: { label: "끄기", onClick: () => setConfidential(false, threadId) },
+          },
+        );
+      }
       void (async () => {
         const rid = await chat.openFormDocument(articleKey, title);
         // 버튼을 누른 직후는 의도가 명시적 — 바로 작성 모달을 연다.
         if (rid) setDocumentId(rid);
       })();
     },
-    [chat, setDocumentId],
+    [chat, mode, setDocumentId, threadId],
   );
 
   // 표시 여부 = mode가 있고 사용자가 닫지 않았을 때
@@ -289,6 +540,9 @@ function PageShellInner() {
             chat={chat}
             configured={configured}
             onUseAsForm={showPro ? handleUseAsForm : undefined}
+            onOpenComposer={
+              showPro && mode !== "monitor" ? () => void openComposer() : undefined
+            }
             shellError={shellError}
             clearShellError={() => setShellError(null)}
             setShellError={setShellError}
@@ -343,7 +597,19 @@ function PageShellInner() {
             </header>
             <div className="min-h-0 flex-1">
               <RightPanel state={chat.state} isRunning={chat.isRunning} reportRunning={chat.reportRunning} reportQueueAhead={chat.state.report_queue_ahead ?? null} reportProgress={chat.state.report_progress ?? null}
-                onUseAsForm={showPro ? handleUseAsForm : undefined} />
+                composerSlot={
+                  <CompositionPanel
+                    threadId={threadId}
+                    mode={mode}
+                    composition={composition}
+                    running={composing}
+                    onChange={(c) => void persistComposition(c)}
+                    onRun={(m) => void runComposition(m)}
+                    onStop={() => { stopRef.current = true; chat.stop(); }}
+                  />
+                }
+                onUseAsForm={showPro ? handleUseAsForm : undefined}
+                watch={watchApi} />
             </div>
           </div>
         ) : null}
@@ -424,6 +690,9 @@ function PageShellInner() {
               onMissingConfig={() => setSettingsOpen(true)}
               threadsOpen={threadsOpen}
               onOpenThreads={openThreads}
+              onOpenComposer={
+              showPro && mode !== "monitor" ? () => void openComposer() : undefined
+            }
               rightPanelToggle={{
                 open: showRightPanel,
                 onToggle: toggleRight,
@@ -456,7 +725,19 @@ function PageShellInner() {
                 }
               >
                 <RightPanel state={chat.state} isRunning={chat.isRunning} reportRunning={chat.reportRunning} reportQueueAhead={chat.state.report_queue_ahead ?? null} reportProgress={chat.state.report_progress ?? null}
-                onUseAsForm={showPro ? handleUseAsForm : undefined} />
+                composerSlot={
+                  <CompositionPanel
+                    threadId={threadId}
+                    mode={mode}
+                    composition={composition}
+                    running={composing}
+                    onChange={(c) => void persistComposition(c)}
+                    onRun={(m) => void runComposition(m)}
+                    onStop={() => { stopRef.current = true; chat.stop(); }}
+                  />
+                }
+                onUseAsForm={showPro ? handleUseAsForm : undefined}
+                watch={watchApi} />
               </Panel>
             </>
           )}
@@ -498,6 +779,8 @@ type ChatColumnProps = {
   onOpenThreads: () => void;
   /** RightPanel 토글 가능 시 (mode 활성). null이면 토글 안 표시 */
   rightPanelToggle: { open: boolean; onToggle: () => void };
+  /** 조합 패널 열기(2026-10-02) — 전문가 모드에서만 전달된다. */
+  onOpenComposer?: () => void;
 };
 
 /**
@@ -541,12 +824,64 @@ function ChatColumn({
   threadsOpen,
   onOpenThreads,
   rightPanelToggle,
+  onOpenComposer,
 }: ChatColumnProps) {
   const { mode } = useMode();
   const router = useRouter();
   const pathname = usePathname();
   const [threadId, setThreadIdQuery] = useQueryState("threadId");
   const [draftPrefill, setDraftPrefill] = useState<string | null>(null);
+
+  /**
+   * 화면에 그릴 턴 — 조합의 중간 단계는 뺀다 (2026-10-02).
+   *
+   * 조합은 단계마다 답을 쏟지 않고 마지막에 한 번만 종합해 보여 준다. 지우는 게
+   * 아니라 접는 것이라, `showProcess` 를 켜면 그대로 다시 보인다.
+   */
+  const [showProcess, setShowProcess] = useState(false);
+  const hiddenTurnCount = useMemo(
+    () => chat.state.turns.filter((t) => t.hidden).length,
+    [chat.state.turns],
+  );
+  const visibleTurns = useMemo(
+    () => (showProcess ? chat.state.turns : chat.state.turns.filter((t) => !t.hidden)),
+    [chat.state.turns, showProcess],
+  );
+
+  // 의견서 초안(2026-10-01) — 입력창 버튼이 이벤트를 쏘면 여기서 생성·오픈한다.
+  const [briefId, setBriefId] = useState<string | null>(null);
+  const briefBusyRef = useRef(false);
+  const [watchOpen, setWatchOpen] = useState(false);
+
+  useEffect(() => {
+    const open = () => setWatchOpen(true);
+    window.addEventListener(OPEN_WATCH_EVENT, open);
+    return () => window.removeEventListener(OPEN_WATCH_EVENT, open);
+  }, []);
+  // 의견서 초안 — 버튼(ChatInput) → 이벤트 → 생성 → 패널. 생성은 즉시 끝난다
+  // (골격 + 인용 목록만 만들고, 내용은 문단 수정으로 채운다).
+  useEffect(() => {
+    const open = () => {
+      if (!threadId || briefBusyRef.current) return;
+      briefBusyRef.current = true;
+      const t = toast.loading("의견서 초안을 만드는 중이에요…");
+      void import("@/lib/client/documents")
+        .then((m) => m.createBrief(threadId))
+        .then((d) => {
+          setBriefId(d.report_id);
+          toast.success(`${d.title} — 문단을 눌러 고쳐 쓰세요`, { id: t });
+        })
+        .catch(() => {
+          toast.error("초안을 만들지 못했습니다.", { id: t });
+        })
+        .finally(() => {
+          briefBusyRef.current = false;
+        });
+    };
+    window.addEventListener(OPEN_BRIEF_EVENT, open);
+    return () => window.removeEventListener(OPEN_BRIEF_EVENT, open);
+  }, [threadId]);
+
   // 서류 초안 서식 선택(2026-08-27) — 최신 답변이 서식을 2개 이상 인용했을 때.
   const [formChoices, setFormChoices] = useState<
     { key: string; title: string; article: string }[] | null
@@ -705,6 +1040,7 @@ function ChatColumn({
         creatingThreadRef.current = true;
         try {
           const t = await createThread();
+          adoptConfidential(t.id); // `/new` 에서 켠 기밀 → 이 스레드로(전역 키 비움)
           setPendingFirstMessage({ text, attachments, skillHint });
           // `/new`에서 송신 시 path도 `/`로 전환 — `/new?threadId=xxx` 어색 URL 방지.
           // (chat) layout이 PageShell을 감싸므로 router.replace 해도 PageShell 유지(언마운트 X).
@@ -728,18 +1064,24 @@ function ChatColumn({
   );
 
   // 새 threadId가 박혔고 pending 메시지가 있으면 송신 (next tick — useChatState reset/getState 우선)
+  //
+  // ⚠️ pending 을 **타이머 안에서** 비운다. effect 본문에서 먼저 비우면 그 즉시
+  // 리렌더가 나고, 이 effect 의 cleanup 이 `setTimeout(…, 0)` 을 **발사 전에
+  // 취소한다** — 첫 메시지가 통째로 사라진다. 타이머가 먼저 도느냐 리렌더가
+  // 먼저 도느냐는 운이라, 화면에 렌더 비용이 조금만 늘어도 뒤집힌다
+  // (2026-10-02 실측: 조합 카드를 붙이자 `/new` 첫 전송이 전부 유실).
+  // 타이머 안에서 비우면 deps 가 그때까지 안 바뀌어 취소될 일이 없고,
+  // 다른 이유로 재실행되더라도 pending 이 남아 있어 다시 예약된다.
   useEffect(() => {
     if (!threadId || !pendingFirstMessage) return;
     const pending = pendingFirstMessage;
-    setPendingFirstMessage(null);
-    const t = window.setTimeout(
-      () =>
-        void send(pending.text, {
-          attachments: pending.attachments,
-          skillHint: pending.skillHint ?? null,
-        }),
-      0,
-    );
+    const t = window.setTimeout(() => {
+      setPendingFirstMessage(null);
+      void send(pending.text, {
+        attachments: pending.attachments,
+        skillHint: pending.skillHint ?? null,
+      });
+    }, 0);
     return () => window.clearTimeout(t);
   }, [threadId, pendingFirstMessage, send]);
 
@@ -800,6 +1142,55 @@ function ChatColumn({
         </header>
       )}
 
+      {/* 서식 선택 — 답변이 여러 서식을 인용한 경우(예: 업 허가 제1호 vs
+              품목 허가 제3호). 잘못 고르면 엉뚱한 신청서를 준비하게 되므로
+              시스템이 대신 고르지 않는다. */}
+          <Dialog
+            open={!!formChoices}
+            onOpenChange={(o) => {
+              if (!o) setFormChoices(null);
+            }}
+          >
+            <DialogContent className="max-w-[440px] gap-0 border border-md-outline-variant bg-md-surface p-0 text-md-on-surface">
+              <DialogTitle className="border-b border-md-outline-variant px-5 py-4 text-[14px] font-semibold">
+                어떤 서식으로 작성할까요?
+              </DialogTitle>
+              <div className="flex flex-col gap-2 p-4">
+                <p className="text-[12px] leading-relaxed text-md-on-surface-variant">
+                  이 답변에서 서식이 여러 개 확인됐어요. 절차가 다르면 서식도
+                  다릅니다 — 해당하는 것을 골라주세요.
+                </p>
+                {(formChoices ?? []).map((f) => (
+                  <button
+                    key={f.key}
+                    type="button"
+                    onClick={() => {
+                      setFormChoices(null);
+                      onUseAsForm?.(f.key, f.title);
+                    }}
+                    className="flex items-start gap-2.5 rounded-card border border-md-outline-variant bg-md-surface-container-lowest px-3.5 py-3 text-left transition-colors hover:border-md-primary hover:bg-md-primary-container/30"
+                  >
+                    <span
+                      className="material-symbols-outlined mt-0.5 text-[18px] text-md-primary"
+                      aria-hidden
+                    >
+                      edit_document
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-[13px] font-semibold leading-snug text-md-on-surface">
+                        {f.title || f.article || "서식"}
+                      </span>
+                      {f.article ? (
+                        <span className="mt-0.5 block text-[11.5px] text-md-on-surface-variant">
+                          {f.article}
+                        </span>
+                      ) : null}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </DialogContent>
+          </Dialog>
       {/* 일반 상담 모드 고지 — 정보형 서비스임을 상시 밝힌다(2026-10-01). */}
       {mode === "public" ? (
         <div
@@ -858,6 +1249,9 @@ function ChatColumn({
               morph — 중앙→하단으로 스무스 슬라이딩(View Transitions). */}
           <div className="vt-chat-input mt-8 w-full max-w-[792px]">
             <ChatInput
+              threadId={threadId}
+              confidentialSeen={!!state.confidential_seen}
+              isMonitor={state.kind === "monitor"}
               running={chatActive}
               disabled={!configured}
               overLimit={overLimit}
@@ -865,6 +1259,7 @@ function ChatColumn({
               quotaWarning={quotaWarning}
               prefill={draftPrefill}
               onPrefillConsumed={() => setDraftPrefill(null)}
+              onOpenComposer={onOpenComposer}
               onSend={(t, atts, hint) =>
                 withViewTransitionAsync(() => void handleSend(t, atts, hint))
               }
@@ -876,10 +1271,22 @@ function ChatColumn({
         <>
           <ChatScroll followKey={followKey} jumpKey={state.turns.at(-1)?.id}>
             <div className="mx-auto flex w-full max-w-[792px] flex-col gap-stack-gap px-6 py-6">
-              {state.turns.map((t, i) => {
+              {hiddenTurnCount > 0 ? (
+                <button
+                  type="button"
+                  data-testid="toggle-process"
+                  onClick={() => setShowProcess((v) => !v)}
+                  className="self-start rounded-pill border border-md-outline-variant px-3 py-1 text-[11.5px] text-md-on-surface-variant transition-colors hover:border-md-primary hover:text-md-primary"
+                >
+                  {showProcess
+                    ? "과정 숨기기"
+                    : `과정 보기 · 조합 단계 ${hiddenTurnCount}건`}
+                </button>
+              ) : null}
+              {visibleTurns.map((t, i) => {
                 // 재설계(2026-07-24): 보고서는 턴 타임라인에 없음 — 활성 판정은
                 // 채팅 스트림만. 보고서 진행은 입력창 위 노티스+우측 패널.
-                const isLast = i === state.turns.length - 1;
+                const isLast = i === visibleTurns.length - 1;
                 const turnActive = isLast && chatActive;
                 return (
                   <TurnView
@@ -941,55 +1348,6 @@ function ChatColumn({
               <DocumentPill document={state.document} />
             </div>
           ) : null}
-          {/* 서식 선택 — 답변이 여러 서식을 인용한 경우(예: 업 허가 제1호 vs
-              품목 허가 제3호). 잘못 고르면 엉뚱한 신청서를 준비하게 되므로
-              시스템이 대신 고르지 않는다. */}
-          <Dialog
-            open={!!formChoices}
-            onOpenChange={(o) => {
-              if (!o) setFormChoices(null);
-            }}
-          >
-            <DialogContent className="max-w-[440px] gap-0 border border-md-outline-variant bg-md-surface p-0 text-md-on-surface">
-              <DialogTitle className="border-b border-md-outline-variant px-5 py-4 text-[14px] font-semibold">
-                어떤 서식으로 작성할까요?
-              </DialogTitle>
-              <div className="flex flex-col gap-2 p-4">
-                <p className="text-[12px] leading-relaxed text-md-on-surface-variant">
-                  이 답변에서 서식이 여러 개 확인됐어요. 절차가 다르면 서식도
-                  다릅니다 — 해당하는 것을 골라주세요.
-                </p>
-                {(formChoices ?? []).map((f) => (
-                  <button
-                    key={f.key}
-                    type="button"
-                    onClick={() => {
-                      setFormChoices(null);
-                      onUseAsForm?.(f.key, f.title);
-                    }}
-                    className="flex items-start gap-2.5 rounded-card border border-md-outline-variant bg-md-surface-container-lowest px-3.5 py-3 text-left transition-colors hover:border-md-primary hover:bg-md-primary-container/30"
-                  >
-                    <span
-                      className="material-symbols-outlined mt-0.5 text-[18px] text-md-primary"
-                      aria-hidden
-                    >
-                      edit_document
-                    </span>
-                    <span className="min-w-0">
-                      <span className="block text-[13px] font-semibold leading-snug text-md-on-surface">
-                        {f.title || f.article || "서식"}
-                      </span>
-                      {f.article ? (
-                        <span className="mt-0.5 block text-[11.5px] text-md-on-surface-variant">
-                          {f.article}
-                        </span>
-                      ) : null}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </DialogContent>
-          </Dialog>
           {recommendNewChat ? (
             <div className="mx-auto w-full max-w-[792px] px-6 pb-2">
               <div
@@ -1029,6 +1387,9 @@ function ChatColumn({
           ) : null}
           <div className="vt-chat-input">
             <ChatInput
+              threadId={threadId}
+              confidentialSeen={!!state.confidential_seen}
+              isMonitor={state.kind === "monitor"}
               running={chatActive}
               disabled={!configured}
               overLimit={overLimit}
@@ -1036,6 +1397,7 @@ function ChatColumn({
               quotaWarning={quotaWarning}
               prefill={draftPrefill}
               onPrefillConsumed={() => setDraftPrefill(null)}
+              onOpenComposer={onOpenComposer}
               onSend={(t, atts, hint) => void handleSend(t, atts, hint)}
               onStop={stop}
               onManualReport={canManualReport ? handleManualReport : undefined}
@@ -1043,6 +1405,33 @@ function ChatColumn({
           </div>
         </>
       )}
+
+      {/* 아래 두 패널은 turns 분기 **밖**에 둔다 — 턴이 0인 스레드(새 모니터링
+          대상이 늘 그렇다)에서도 열려야 한다(2026-10-02 실측 버그). */}
+      {/* 모니터링 작업 창(2026-10-02) — 관찰 목록 · 보고서 · 발송 */}
+      {threadId ? (
+        <MonitorWorkDialog
+          open={watchOpen}
+          threadId={threadId}
+          onClose={() => setWatchOpen(false)}
+        />
+      ) : null}
+      {/* 의견서 초안 패널(2026-10-01) — 문단 단위 수정. 서식과 달리 조문 본문
+          소스가 없어도 열린다(근거는 대화의 인용에 이미 있다). */}
+      <Dialog
+        open={!!briefId}
+        onOpenChange={(o) => {
+          if (!o) setBriefId(null);
+        }}
+      >
+        <DialogContent className="h-[82vh] max-w-[760px] gap-0 overflow-hidden border border-md-outline-variant bg-md-surface p-0 text-md-on-surface">
+          <DialogTitle className="sr-only">의견서 초안</DialogTitle>
+          {briefId ? (
+            <BriefPanel reportId={briefId} onClose={() => setBriefId(null)} />
+          ) : null}
+        </DialogContent>
+      </Dialog>
+
     </section>
   );
 }

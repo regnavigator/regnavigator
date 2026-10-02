@@ -422,18 +422,35 @@ export function applyMeta(
   prev: ChatState,
   serverHumanId: string,
   localId: string,
+  hidden = false,
 ): ChatState {
-  if (!serverHumanId || serverHumanId === localId) return prev;
+  if (!serverHumanId || serverHumanId === localId) {
+    // id 는 그대로여도 hidden 은 반영해야 한다 — 안 하면 조합 단계가 화면에
+    // 쏟아졌다가 새로고침 후에야 사라진다.
+    if (!hidden) return prev;
+    return {
+      ...prev,
+      messages: prev.messages.map((m) =>
+        m.id === localId ? { ...m, hidden: true } : m,
+      ),
+      turns: prev.turns.map((t) => (t.id === localId ? { ...t, hidden: true } : t)),
+    };
+  }
   const idx = prev.messages.findIndex((m) => m.id === localId);
   if (idx < 0) return prev;
   const messages = prev.messages.slice();
-  messages[idx] = { ...messages[idx]!, id: serverHumanId };
+  messages[idx] = {
+    ...messages[idx]!,
+    id: serverHumanId,
+    ...(hidden ? { hidden: true } : {}),
+  };
   const turns = prev.turns.map((t) =>
     t.id === localId
       ? {
           ...t,
           id: serverHumanId,
           user_message: { ...t.user_message, id: serverHumanId },
+          ...(hidden ? { hidden: true } : {}),
         }
       : t,
   );
@@ -622,7 +639,7 @@ export type StreamHandlers = {
   onInterrupt: (value: InterruptValue) => void;
   onError: (data: unknown) => void;
   /** 자체 SSE `meta` — 서버 발급 human message id (localId 치환용) */
-  onMeta?: (humanMessageId: string) => void;
+  onMeta?: (humanMessageId: string, hidden?: boolean) => void;
   /** custom 채널의 tool_progress 이벤트 — running step에 라이브 메시지 갱신 (back v4) */
   onToolProgress?: (event: ToolProgressEvent) => void;
   /** `done` 이벤트 수신 — 텍스트 확정. 이후 grounding(trailing steps)이 와도 턴은
@@ -743,6 +760,9 @@ export function composeWithAttachments(
   );
 }
 
+/** 원내 모델 고지를 이미 띄운 스레드 — 턴마다 토스트가 쌓이지 않게. */
+const _localNotified = new Set<string>();
+
 export async function runStream(
   threadId: string,
   options: {
@@ -757,6 +777,12 @@ export async function runStream(
     attachments?: ChatAttachmentPayload[] | null;
     /** 스킬 명시 진입 — "irb_drb": IRB/DRB 버튼(이중 접근) */
     skillHint?: string | null;
+    /** 조합 중간 단계 — 렌더 제외 */
+    hidden?: boolean;
+    /** 단계별 기밀(2026-10-02) — 주면 전역 토글 대신 이 값을 쓴다 */
+    confidential?: boolean;
+    /** 조합 첨부 id — 서버가 본문을 꺼내 합친다 */
+    workflowFileIds?: string[];
     inactivityTimeoutMs?: number;
   },
   handlers: StreamHandlers,
@@ -787,7 +813,7 @@ export async function runStream(
     }
     switch (ev.type) {
       case "meta":
-        handlers.onMeta?.(ev.human_message_id);
+        handlers.onMeta?.(ev.human_message_id, ev.hidden);
         break;
       case "pii_notice": {
         // 입력에서 개인정보 자동 제거됨 — 토스트 고지 + 오탐 신고(2026-08-13).
@@ -851,6 +877,21 @@ export async function runStream(
           .filter((v, i, a) => a.indexOf(v) === i);
         const detail = labels.length ? ` (${labels.join(", ")})` : "";
         toast.info(`입력에 포함된 개인정보를 자동으로 제거했어요${detail}. 특정 개인·주소는 조회할 수 없어요.`);
+        break;
+      }
+      case "processing_mode": {
+        // 서버가 확정한 처리 경로 고지(2026-10-01). 입력창 배너는 **클라이언트의
+        // 설정값**을 보여 줄 뿐이라 "정말 그렇게 처리됐는가"는 알려주지 못한다.
+        // 이 이벤트가 서버 쪽 확인이다. 턴마다 띄우면 소음이라 스레드당 한 번만.
+        if (ev.local && !_localNotified.has(ev.thread_id)) {
+          _localNotified.add(ev.thread_id);
+          toast.info(
+            ev.confidential
+              ? "이 대화는 원내(온프레미스) 모델에서 처리됩니다 — 외부 전송·웹 검색 없음."
+              : "이 질문은 원내(온프레미스) 모델에서 처리됩니다.",
+            { duration: 8000 },
+          );
+        }
         break;
       }
       case "token":
@@ -922,7 +963,11 @@ export async function runStream(
           style: getAnswerStyle(),
           attachments: options.attachments ?? null,
           skill_hint: options.skillHint ?? null,
-          confidential: getConfidential(),
+          // 조합은 단계마다 기밀이 다를 수 있다 — 명시값이 있으면 그걸 쓰고,
+          // 없으면 전역 토글(일반 채팅)을 쓴다.
+          confidential: options.confidential ?? getConfidential(threadId),
+          hidden: options.hidden ?? false,
+          workflow_file_ids: options.workflowFileIds ?? null,
         },
         { signal: innerAc.signal },
         onEvent,

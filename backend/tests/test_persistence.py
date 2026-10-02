@@ -11,6 +11,8 @@ import os
 
 import pytest
 
+from src.middleware import AUTH_DEV_BYPASS_USER_ID
+
 
 @pytest.fixture(autouse=True)
 def _isolated_persistence(tmp_path, monkeypatch):
@@ -244,6 +246,8 @@ def threads_repo(monkeypatch):
 
 
 def test_api_auto_title_idempotent_when_already_set(threads_repo, monkeypatch):
+    # 거부 기본값(2026-10-03): 소유자 검사는 요청 user_id 가 있어야 통과 — bypass 사용자로.
+    monkeypatch.setenv("AUTH_DEV_BYPASS_USER", "dev@example.com")
     """R7 — 이미 thread.title 있으면 LLM 호출 없이 그대로 반환."""
     from fastapi.testclient import TestClient
     from langchain_core.messages import HumanMessage
@@ -255,7 +259,8 @@ def test_api_auto_title_idempotent_when_already_set(threads_repo, monkeypatch):
         cl, "_base_model",
         lambda spec: pytest.fail("LLM must not be called when title already set"))
 
-    threads_repo.ensure_thread("tA")
+    # owner 없는 스레드는 이제 거부된다(2026-10-03 거부 기본값) — bypass 사용자 소유로.
+    threads_repo.ensure_thread("tA", user_id=AUTH_DEV_BYPASS_USER_ID)
     threads_repo.append_messages("tA", [HumanMessage(content="광고 심의 질문", id="m1")])
     threads_repo.set_title("tA", "기존 제목")
 
@@ -274,11 +279,12 @@ def test_api_auto_title_404_when_thread_missing(threads_repo):
     assert res.status_code == 404
 
 
-def test_api_auto_title_409_when_no_human_message(threads_repo):
+def test_api_auto_title_409_when_no_human_message(threads_repo, monkeypatch):
+    monkeypatch.setenv("AUTH_DEV_BYPASS_USER", "dev@example.com")
     from fastapi.testclient import TestClient
     from src.api import app
 
-    threads_repo.ensure_thread("tB")  # human 메시지 없는 thread
+    threads_repo.ensure_thread("tB", user_id=AUTH_DEV_BYPASS_USER_ID)  # human 메시지 없는 thread
 
     client = TestClient(app)
     res = client.post("/chat/tB/auto-title")
