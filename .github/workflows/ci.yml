@@ -1,0 +1,44 @@
+# CI — 배포 게이트 (2026-10-03).
+#
+# 감사: 1,480+ 테스트·env 정합 검사·품질 회귀가 전부 **수동 또는 야간 cron** 이었다.
+# 배포를 막는 게이트가 0 — 테스트가 있어도 없는 것과 같았다.
+name: ci
+on:
+  push:
+    branches: [main, "feat/**", "fix/**"]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: backend } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12", cache: pip }
+      - run: pip install -e ".[dev]"
+      - name: env 노브 3곳 정합 (ENV_REGISTRY · compose · example)
+        run: python scripts/check_env_consistency.py --strict
+      - name: ruff (변경과 무관한 기존 위반은 F/E9 만 게이트)
+        run: ruff check src tests --select F,E9
+      - name: pytest
+        env: { PYTHONUTF8: "1" }
+        run: pytest tests/ -q --deselect tests/test_admin_settings.py::test_admin_stats_and_citation_report
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: frontend } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20", cache: npm, cache-dependency-path: frontend/package-lock.json }
+      - run: npm ci
+      - run: npm run lint
+      - run: npx tsc --noEmit
+      - run: npm test -- --run
+      - name: build (NEXT_PUBLIC_* 는 번들 inline — 값은 placeholder)
+        env:
+          DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci"
+          NEXTAUTH_SECRET: "ci-only-not-a-secret"
+          NEXT_PUBLIC_BACKEND_URL: "http://localhost:2024"
+        run: npm run build

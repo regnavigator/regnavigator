@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Any, Optional
+from typing import Optional
 
 #: 규칙이 전부 걸러도 이만큼은 남긴다(점수 상위). 근거 0건 방지.
 MIN_KEEP = 4

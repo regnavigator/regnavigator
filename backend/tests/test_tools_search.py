@@ -13,7 +13,6 @@ from __future__ import annotations
 import sys
 from types import SimpleNamespace
 
-import pytest
 
 
 def _call(tool_fn, args: dict, *, tool_call_id: str = "call_1", state: dict | None = None):

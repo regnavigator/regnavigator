@@ -28,12 +28,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# 검색 품질은 **현행 기준**으로 잰다(2026-08-16). 시행예정 동반분(`_ef` 키)은
-# 실버 라벨(현행 article_key 만 수록)에 없어 미스로 잡혀 지표를 희석한다 —
-# 실측: 동반 on 이면 hit@3 0.541→0.448·recall@10 0.816→0.664 로 보이지만
-# off 로 재면 베이스라인과 완전히 동일(= 실제 품질 저하 아님, 측정 아티팩트).
-# 동반 기능 자체의 평가가 필요해지면 예정본 라벨을 별도 셋으로 만든다.
-os.environ.setdefault("SEARCH_INCLUDE_PENDING", "0")
+# 운영과 같은 설정(`SEARCH_INCLUDE_PENDING=1`)으로 잰다(2026-10-03). 종전엔 0 을
+# 강제했다 — 예정본 키(`_ef…`)가 라벨에 없어 미스로 잡히는 **측정 아티팩트**를 피하려
+# 핵심 기능을 평가에서 뺀 것. 지금은 `normalize_keys` 가 키를 현행으로 접어 비교한다.
+# 명시 설정이 있으면 존중.
+os.environ.setdefault("SEARCH_INCLUDE_PENDING", "1")
 
 
 def main() -> int:
@@ -48,7 +47,7 @@ def main() -> int:
         queries = json.load(f)
     top_k = int(os.getenv("EVAL_TOP_K") or "10")
 
-    from src.eval.metrics import aggregate, evaluate_query
+    from src.eval.metrics import aggregate, evaluate_query, normalize_keys
     from src.tools.search import run_qdrant
 
     per_query: list[dict] = []
@@ -61,11 +60,11 @@ def main() -> int:
             # 라벨과 동일 종별로 검색(guide 질의 등) — 미지정은 기본(종전 동작).
             core = run_qdrant(q, top_k=top_k,
                               target_types=item.get("target_types"))
-            retrieved = list(core.final_keys)
+            retrieved = normalize_keys(core.final_keys)
         except Exception as e:  # noqa: BLE001
             print(f"  {i}. ERROR {type(e).__name__}: {e}")
             retrieved = []
-        m = evaluate_query(retrieved, relevant, ks=(1, 3, 5, top_k))
+        m = evaluate_query(retrieved, normalize_keys(relevant), ks=(1, 3, 5, top_k))
         per_query.append(m)
         print(f"  {i}. recall@{top_k}={m[f'recall@{top_k}']} "
               f"mrr={m['mrr']:.3f} ({time.perf_counter() - t0:.1f}s) | {q[:40]}")

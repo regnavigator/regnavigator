@@ -711,9 +711,7 @@ _DOCUMENT_DRAFT_INSTRUCTIONS = (
 # (규율·근거·목적)를 정하고, "어떻게 길게 쓸지"는 엔진이 맡는다.
 from src.report_sections import (  # noqa: E402
     make_title,
-    section_specs,
     sectioned_enabled,
-    strip_stray_headers,
     write_sections,
     write_single,
 )

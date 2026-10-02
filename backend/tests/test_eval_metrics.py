@@ -57,3 +57,11 @@ def test_aggregate_means_and_skips_none():
 
 def test_aggregate_empty():
     assert aggregate([]) == {}
+
+
+def test_normalize_keys_folds_pending_into_current():
+    """예정본 키는 현행 키로 접힌다 — 운영 설정 그대로 평가하기 위해(2026-10-03)."""
+    from src.eval.metrics import normalize_key, normalize_keys
+    assert normalize_key("004097_0025001_ef20270527") == "004097_0025001"
+    assert normalize_key("004097_0025001") == "004097_0025001"
+    assert normalize_keys(["a_ef20270101", "a", "b"]) == ["a", "b"]

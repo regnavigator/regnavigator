@@ -27,7 +27,6 @@ import os
 from typing import Optional
 from uuid import uuid4
 
-from langchain_core.messages import AIMessage
 
 from src.observability import usage_context
 from src.persistence import get_report_runs_repo

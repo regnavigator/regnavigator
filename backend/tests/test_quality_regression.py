@@ -195,3 +195,31 @@ def test_last_full_run_ignores_partial_runs(monkeypatch, tmp_path):
                     payload_json=_json.dumps({"summary": {"n": 3}, "partial": True})))
     payload, ts = _last_full_run()
     assert payload["summary"]["n"] == 16 and ts is not None and ts.tzinfo is not None
+
+
+# ── 2026-10-03: 환각·무인용 임계 ─────────────────────────────────────────
+
+def test_claim_flag_ratio_triggers_regardless_of_prev():
+    """환각 신호는 절대 임계 — 전일이 없어도, 전일도 나빴어도 울린다."""
+    cur = aggregate([_row()])
+    cur.update(claim_total=20, claim_flagged=5)
+    assert any("환각" in i for i in detect_regression(cur, None))
+    assert any("환각" in i for i in detect_regression(cur, dict(cur)))
+
+
+def test_claim_flag_ratio_quiet_when_small_sample():
+    cur = aggregate([_row()]); cur.update(claim_total=4, claim_flagged=4)
+    assert not any("환각" in i for i in detect_regression(cur, None))
+
+
+def test_no_citation_ratio_not_only_all_zero():
+    """15/16 이 무인용이어도 1개만 인용 있으면 조용하던 결함."""
+    rows = [_row(citations=0) for _ in range(5)] + [_row(citations=3)]
+    cur = aggregate(rows)
+    assert any("무인용 규제 질문" in i for i in detect_regression(cur, None))
+
+
+def test_golden_set_is_large_enough():
+    from scripts.quality_regression import GOLDEN_QUESTIONS
+    assert len(GOLDEN_QUESTIONS) >= 50
+    assert len({g["q"] for g in GOLDEN_QUESTIONS}) == len(GOLDEN_QUESTIONS)

@@ -71,7 +71,7 @@ def _get_pool():
             return _pool
 
         try:
-            import psycopg
+            import psycopg  # noqa: F401 — 가용성 프로브(미설치면 ImportError 로 폴백)
             from psycopg.rows import dict_row
             from psycopg_pool import ConnectionPool
         except ImportError:

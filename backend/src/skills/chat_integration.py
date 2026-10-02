@@ -20,7 +20,7 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 from langchain_core.messages import ToolMessage
 

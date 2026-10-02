@@ -1076,6 +1076,25 @@ def _tool_qdrant(args: dict, state: dict, tcid: str) -> ToolExec:
         _log.debug("applicability judge failed", exc_info=True)
     if _unfit:
         _log.info("applicability: %d건 제외 %s", len(_unfit), sorted(_unfit))
+        # 삭제 판정을 **적재**한다(2026-10-03). 종전엔 로그 한 줄뿐 — 정답 조문을
+        # 지워도 아무도 몰랐다. 평가셋(변호사 라벨)과 대조해 오탐률을 재는 재료.
+        # payload 는 조문 키·제목 발췌·사유 — 사용자 질문 본문은 싣지 않는다.
+        try:
+            from src.persistence import get_events_repo
+            from src.persistence.events_repo import Event as _Ev
+            import json as _json
+            _dropped = [{"number": c.get("number"), "id": c.get("id"),
+                         "title": str(c.get("title") or "")[:80],
+                         "why": str(_unfit.get(c.get("number")) or "")[:120]}
+                        for c in citations if c.get("number") in _unfit]
+            get_events_repo().emit(_Ev(
+                id="", ts="", event_type="applicability_drop",
+                user_id=state.get("user_id"), thread_id=state.get("thread_id"),
+                payload_json=_json.dumps({"dropped": _dropped,
+                                          "kept": len(citations) - len(_dropped)},
+                                         ensure_ascii=False)))
+        except Exception:  # noqa: BLE001 — 관측 실패가 검색을 막으면 안 된다
+            _log.warning("applicability_drop 적재 실패", exc_info=True)
         citations = [c for c in citations if c.get("number") not in _unfit]
 
     num_by_id = {c["id"]: c["number"] for c in citations}

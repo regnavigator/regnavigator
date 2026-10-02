@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import time
 
-import pytest
 
 from src import report_pipeline as RP
 from src.tools.search import SearchError

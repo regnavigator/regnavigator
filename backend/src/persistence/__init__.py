@@ -219,6 +219,7 @@ def get_report_runs_repo() -> ReportRunsRepo:
 
 
 __all__ = [
+    "WorkflowFile",
     "BlobStore",
     "ReportsRepo",
     "ReportMeta",

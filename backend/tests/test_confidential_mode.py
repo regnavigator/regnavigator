@@ -124,16 +124,13 @@ def test_confidential_without_local_config_does_not_fall_back(monkeypatch):
     사용자는 보호받는다고 믿고 사건 파일을 넣는다. 설정이 없다고 조용히 상용
     모델로 넘기면 기밀 모드가 있는 것이 없는 것보다 위험하다.
     """
-    import src.chat_loop as cl
     import src.skill_local as sl
 
     monkeypatch.setattr(sl, "enabled", lambda: False)
 
-    emitted: list[dict] = []
-
     async def _run():
         # 실제 턴 대신 가드 분기만 타도록 최소 스텁을 쓴다.
-        from unittest.mock import AsyncMock, MagicMock
+        from unittest.mock import MagicMock
 
         repo = MagicMock()
         repo.append_messages = MagicMock()

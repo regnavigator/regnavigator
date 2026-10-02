@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import time
 
-import pytest
 
 from src.steps import new_step_id, now_ms, step_done, step_error, step_start
 

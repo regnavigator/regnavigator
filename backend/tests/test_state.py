@@ -5,7 +5,6 @@ spec: 02_INTERFACE.md §2 / I2 — 같은 id의 running → done 전이 안전.
 
 from __future__ import annotations
 
-import pytest
 
 from src.steps import merge_steps_by_id
 

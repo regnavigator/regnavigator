@@ -11,14 +11,14 @@ idempotent 동작 (deepagents 내장 `write_file` 충돌 회피):
 from __future__ import annotations
 
 import re
-from typing import Annotated, Optional
+from typing import Optional
 
 from langchain_core.runnables.config import ensure_config
 
 from src.persistence import get_blob_store, get_reports_repo
 from src.persistence.reports_repo import ReportMeta, _new_id
-from src.steps import now_ms, step_done, step_error, step_start
-from src.text.messages import last_ai_text as _last_ai_text
+from src.text.messages import last_ai_text as _last_ai_text  # noqa: F401 — 재export(tests/test_tools_reports)
+from src.steps import now_ms
 
 
 # 보고서 본문에서 LLM이 자동으로 박는 "운영 메타데이터" 줄을 잡는 패턴.

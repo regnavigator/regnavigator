@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-import pytest
 
 from src.tools.search import (
     _publisher_from_url,

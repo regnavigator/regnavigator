@@ -12,7 +12,7 @@ import logging
 import os
 import re
 import time
-from typing import Annotated, NamedTuple
+from typing import NamedTuple
 
 from src.steps import resolve_turn_context
 # 진행상황 emit — observability 로 분리(검색 코어와 무관한 stream 이벤트). re-export 로

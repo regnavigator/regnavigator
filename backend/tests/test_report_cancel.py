@@ -149,7 +149,6 @@ def test_chat_cancel_intent_regex():
 
 def test_chat_cancel_intent_guides_to_button(repos, monkeypatch, tmp_path):
     """진행 중 run 이 있으면 LLM 없이 [중단] 버튼 안내로 턴 종료."""
-    import src.persistence.threads_repo as tr
     from src.persistence import get_report_runs_repo
     from src.chat_loop import run_chat_turn
 

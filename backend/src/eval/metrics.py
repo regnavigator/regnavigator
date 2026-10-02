@@ -7,7 +7,34 @@ hit@k = 상위 k 에 정답 하나라도 / MRR = 첫 정답의 역순위.
 
 from __future__ import annotations
 
+import re
 from typing import Iterable, Optional
+
+
+_EF_SUFFIX = re.compile(r"_ef\d{8}$")
+
+
+def normalize_key(article_key: str) -> str:
+    """시행예정본 키(`…_ef20270527`) → 현행 키. 평가 비교 전에 적용(2026-10-03).
+
+    종전엔 평가가 `SEARCH_INCLUDE_PENDING=0` 을 강제했다 — 운영 기본값(1)인 핵심
+    기능이 평가 대상에서 빠져 있었다. 이유는 라벨이 현행 키만 수록해 예정본이 미스로
+    잡혔기 때문이지 품질 저하가 아니었다(측정 아티팩트). 키를 정규화하면 운영과 같은
+    설정으로 잴 수 있다.
+    """
+    return _EF_SUFFIX.sub("", article_key or "")
+
+
+def normalize_keys(keys: Iterable[str]) -> list[str]:
+    """정규화 + 순서 보존 dedupe(예정본·현행본이 같은 조문으로 합쳐질 때)."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for k in keys:
+        n = normalize_key(k)
+        if n and n not in seen:
+            seen.add(n)
+            out.append(n)
+    return out
 
 
 def recall_at_k(retrieved: list[str], relevant: Iterable[str], k: int) -> Optional[float]:

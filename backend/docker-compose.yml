@@ -68,7 +68,6 @@ services:
       LLM_MODEL: ${LLM_MODEL:-claude-sonnet-4-6}
       LLM_FALLBACK: ${LLM_FALLBACK:-openai:gpt-4o}
       SUBAGENT_MODEL: ${SUBAGENT_MODEL:-claude-haiku-4-5-20251001}
-      SUBAGENT_FALLBACK: ${SUBAGENT_FALLBACK:-openai:gpt-4o-mini}
       TITLE_MODEL: ${TITLE_MODEL:-anthropic:claude-haiku-4-5-20251001}
       MAX_MODEL_CALLS_PER_RUN: ${MAX_MODEL_CALLS_PER_RUN:-250}
 
@@ -321,8 +320,6 @@ services:
       # === 영속 (Postgres + 로컬 blob) ===
       REPORTS_BACKEND: ${REPORTS_BACKEND:-postgres}
       REPORTS_PG_DSN: postgresql://${POSTGRES_USER:-medi}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-medi}
-      CHECKPOINT_BACKEND: ${CHECKPOINT_BACKEND:-postgres}
-      CHECKPOINT_PG_DSN: postgresql://${POSTGRES_USER:-medi}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-medi}
       BLOB_BACKEND: ${BLOB_BACKEND:-local}
       BLOB_LOCAL_DIR: ${BLOB_LOCAL_DIR:-/app/data/blobs}
       # GCS로 전환 시:

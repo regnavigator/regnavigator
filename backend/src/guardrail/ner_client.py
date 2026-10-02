@@ -199,7 +199,6 @@ def _server_handles_long_input() -> bool:
         return bool(_CAP["long_input"])
     val = False
     try:
-        import httpx
 
         r = _client().get(f"{_base_url()}/health",
                           headers={"X-API-Key": _api_key()})
