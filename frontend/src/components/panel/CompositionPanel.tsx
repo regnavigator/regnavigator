@@ -64,8 +64,12 @@ export function CompositionPanel({
   const fileRef = useRef<HTMLInputElement | null>(null);
   const fileStepRef = useRef<number>(-1);
 
+  // 패널을 여는 기능(brief·watch)은 숨은 턴으로 돌릴 수 없다 — 조합에 넣으면
+  // 제목 문장만 전송되고 패널은 안 열린다(2026-10-03 감사 U8). 피커에서 뺀다.
   const all = useMemo(
-    () => featuresFor({ mode, hasTurns: true }),
+    () => featuresFor({ mode, hasTurns: true }).filter(
+      (f) => f.triggers !== "brief" && f.triggers !== "watch",
+    ),
     [mode],
   );
   const byId = useMemo(() => new Map(all.map((f) => [f.id, f])), [all]);

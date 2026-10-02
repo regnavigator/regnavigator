@@ -473,7 +473,7 @@ export function ThreadList({ configured, refreshKey, onError, onCollapse, onOpen
           실측 피드백 2026-07-24). 넘치면 섹션 내부 스크롤. */}
       <div className="flex max-h-[200px] min-h-[64px] shrink-0 flex-col overflow-hidden pb-2">
         {/* 심층 보고서 — 전문가 전용(2026-10-01 모드 분기) */}
-        {showPro && !isMonitorMode ? (
+        {showPro ? (
         <ReportsSection
           reports={displayReports}
           onPreview={(r) => setPreviewReport(r)}
@@ -484,19 +484,18 @@ export function ThreadList({ configured, refreshKey, onError, onCollapse, onOpen
       {/* 작성한 서식 — 다시 열기·삭제(2026-09-18). 없으면 섹션 자체를 숨겨
           대화 목록 공간을 뺏지 않는다. */}
       {/* 작성한 서식 — 전문가 전용 */}
-      {showPro && !isMonitorMode ? <DocumentsSection refreshKey={refreshKey} /> : null}
+      {showPro ? <DocumentsSection refreshKey={refreshKey} /> : null}
 
 
       {/* 모니터링 스레드(2026-10-02) — 대화와 섞으면 알람이 묻힌다.
           설계: backend/docs/spec/monitor-threads-design.md */}
       {isMonitorMode ? <MonitorSection refreshKey={refreshKey} /> : null}
 
-      {/* 채팅 목록 — 남은 공간 (flex-1). 모니터링 모드에선 숨긴다(모드별 스코프). */}
-      <div
-        className={
-          "flex flex-1 min-h-0 flex-col " + (isMonitorMode ? "hidden" : "")
-        }
-      >
+      {/* 채팅 목록 — 남은 공간 (flex-1).
+          모드는 **뷰 필터이지 삭제가 아니다**(2026-10-03 감사 P3). 종전엔 모니터링
+          모드에서 대화 목록 전체를, 일반 모드에서 보고서·서식 전체를 `hidden` 으로
+          감춰 사용자에게 "없어졌다"로 보였다. 모니터링 모드에선 접어 두되 펼 수 있다. */}
+      <div className="flex flex-1 min-h-0 flex-col">
         <h3 className="px-3 pb-2 text-[11px] font-semibold text-md-on-surface-variant">
           대화
         </h3>

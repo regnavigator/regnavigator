@@ -549,7 +549,7 @@ export function ChatInput({
           </div>
 
           {/* 하단 toolbar — 첨부·@피드백·심층 보고서. 좌측만 사용 (전송은 위로 이동). */}
-          <div className="flex items-center gap-1 px-3 pb-3">
+          <div className="flex flex-wrap items-center gap-1 px-3 pb-3">
             <input
               ref={fileInputRef}
               type="file"
@@ -723,7 +723,7 @@ export function ChatInput({
                     className="inline-flex h-9 items-center gap-1.5 rounded-full px-3.5 text-[13px] font-medium text-md-on-surface-variant transition-colors hover:bg-md-surface-container-low hover:text-md-on-surface disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     <span className="material-symbols-outlined text-[16px]" aria-hidden>
-                      lab_profile
+                      summarize
                     </span>
                     심층 보고서
                   </button>

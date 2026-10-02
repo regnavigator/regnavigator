@@ -219,8 +219,14 @@ function PageShellInner() {
           const st = steps[cur]!;
           const f = byId.get(st.fn);
           if (!f) {
-            cur += 1;
-            continue;
+            // 저장된 단계가 지금 모드의 기능 목록에 없다(모드를 바꿨거나 기능이
+            // 빠짐). 종전엔 조용히 건너뛰어 **전 단계가 스킵된 채 빈 종합**을 보이는
+            // 턴으로 보냈다. 멈추고 말한다.
+            toast.error("조합을 실행할 수 없습니다", {
+              description: `'${st.fn}' 단계는 현재 모드에서 쓸 수 없는 기능입니다. 전문가 모드로 바꾸거나 단계를 빼 주세요.`,
+              duration: 9000,
+            });
+            return;
           }
 
           // 단계 = 숨은 턴. 기밀은 **이 단계의 값**을 쓴다(전역 토글 아님).
@@ -231,7 +237,17 @@ function PageShellInner() {
             docKinds: f.docKinds,
           });
           const ok = await waitIdle();
-          if (!ok) break;
+          if (!ok) {
+            // 침묵 중단 금지(2026-10-03). 종전엔 5분 상한·중단 모두 break 만 하고
+            // 아무 표시가 없었다 — 조합이 조용히 끝나고 화면은 아무 일 없던 것처럼.
+            if (!stopRef.current) {
+              toast.error("조합이 중단됐습니다", {
+                description: `${f.title} 단계가 5분 안에 끝나지 않았습니다. 다시 실행하면 이 단계부터 이어집니다.`,
+                duration: 9000,
+              });
+            }
+            break;
+          }
 
           steps = steps.map((x, i) => (i === cur ? { ...x, done: true } : x));
           cur += 1;
@@ -260,11 +276,12 @@ function PageShellInner() {
           }
         }
 
-        // 종합 — 이것만 화면에 보인다.
-        if (!stopRef.current && cur >= steps.length) {
-          const titles = steps
-            .map((x) => byId.get(x.fn)?.title)
-            .filter((t): t is string => !!t);
+        // 종합 — 이것만 화면에 보인다. 실제로 돈 단계가 없으면 종합도 없다.
+        const titles = steps
+          .filter((x) => x.done)
+          .map((x) => byId.get(x.fn)?.title)
+          .filter((t): t is string => !!t);
+        if (!stopRef.current && cur >= steps.length && titles.length > 0) {
           // 기밀 단계가 하나라도 있었으면 종합도 원내에서 한다 — 종합은 그
           // 내용을 읽어야 하므로, 상용으로 보내면 격리가 여기서 무너진다.
           const anyConf = steps.some((x) => x.confidential);
@@ -617,6 +634,14 @@ function PageShellInner() {
 
         <DocumentWorkModal document={chat.state.document} />
         <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+        {/* 좁은 화면에도 **같은 전역 모달**(2026-10-03 감사 F4). 종전엔 아래 5개가
+            narrow 분기에서 빠져 — Ctrl+K 무반응, 사이드바 '둘러보기' 죽은 버튼,
+            운영자 앱 내 알림(UserNoticePrompt)이 모바일 사용자에게 영구 미전달. */}
+        <CommandPalette />
+        <FeatureTour />
+        <TokenFeedbackPrompt />
+        <PatchNotesPrompt />
+        <UserNoticePrompt />
       </div>
     );
   }
