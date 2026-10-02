@@ -165,6 +165,7 @@ export function useChatState(
       confidential?: boolean;
       /** 조합 첨부 — 서버가 본문을 꺼내 합친다(텍스트를 다시 올리지 않는다) */
       workflowFileIds?: string[];
+      docKinds?: string[];
     },
   ) => Promise<void>;
   /** 보고서 트리거(next_steps `kind:"report"` 클릭) — `POST /reports` + 폴링. */
@@ -224,6 +225,7 @@ export function useChatState(
         hidden?: boolean;
         confidential?: boolean;
         workflowFileIds?: string[];
+        docKinds?: string[];
       }
     | { kind: "report"; prompt: string; idempotencyKey: string }
     | null
@@ -367,6 +369,7 @@ export function useChatState(
         hidden?: boolean;
         confidential?: boolean;
         workflowFileIds?: string[];
+        docKinds?: string[];
       },
     ) => {
       if (!threadId) return;
@@ -381,6 +384,7 @@ export function useChatState(
         hidden: opts?.hidden,
         confidential: opts?.confidential,
         workflowFileIds: opts?.workflowFileIds,
+        docKinds: opts?.docKinds,
       };
       pendingLocalIdRef.current = localId;
       const isFirstForTitle =
@@ -423,6 +427,7 @@ export function useChatState(
         hidden: opts?.hidden,
         confidential: opts?.confidential,
         workflowFileIds: opts?.workflowFileIds,
+        docKinds: opts?.docKinds,
           },
           handlers,
         );

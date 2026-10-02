@@ -222,6 +222,13 @@ export function CompositionPanel({
                     <span className="block text-[11px] text-md-on-surface-variant">
                       {f.subtitle}
                     </span>
+                    {/* 한계 고지(expects)는 여기서도 보여야 한다(2026-10-03) — 조합
+                        경로엔 다이얼로그가 없어 한 번도 못 보고 단계를 담았다. */}
+                    {f.expects.length ? (
+                      <span className="mt-1 block text-[10.5px] leading-snug text-md-on-surface-variant/80">
+                        {f.expects.join(" · ")}
+                      </span>
+                    ) : null}
                   </button>
                 </li>
               ))}

@@ -46,6 +46,13 @@ export type Feature = {
    * 고쳐도 되지만 id 는 고치지 않는다.
    */
   id: string;
+  /**
+   * 턴 기본 검색 종별(2026-10-03). 종전엔 build 가 `doc_kinds=["prec"]` 를
+   * 사용자 입력창에 평문으로 박았다 — 내부 파라미터 노출 + 지우면 기능이 조용히
+   * 달라짐. 구조화 필드로 `POST /chat.doc_kinds` 에 실린다. 백엔드는 이 값을
+   * 한계 고지(`legal.FEATURE_CAVEATS`) 키로도 쓴다.
+   */
+  docKinds?: string[];
   /** 그룹 라벨 겸 뱃지 — 격자 피커가 이걸로 묶는다 */
   category: string;
   title: string;
@@ -171,6 +178,7 @@ const EXPERT: Feature[] = [
   },
   {
     id: "prec_issues",
+    docKinds: ["prec"],
     category: "판례 검토",
     title: "판례 검색 · 핵심 이슈 정리",
     subtitle: "법원 · 선고일 · 판시 요지를 표로",
@@ -186,7 +194,7 @@ const EXPERT: Feature[] = [
         { key: "scope", label: "범위 (선택)", placeholder: "예: 대법원 판결 위주 / 최근 10년" },
       ],
       build: (v) =>
-        `판례를 찾아 핵심 쟁점을 정리해줘. 검색은 판례 종별(doc_kinds=["prec"])로 해줘.\n\n` +
+        `판례를 찾아 핵심 쟁점을 정리해줘.\n\n` +
         `[쟁점]\n${slot(v.issue, "쟁점을 적어 주세요")}` +
         `\n\n[범위]\n${slot(v.scope, "범위")}\n\n` +
         "사건마다 법원·선고일·판시 요지·결론을 표로 정리하고, 비슷해 보이는 " +
@@ -257,11 +265,14 @@ const EXPERT: Feature[] = [
     title: "의무 주체 · 기한 · 제재 추출",
     subtitle: "누가 · 언제까지 · 안 하면 얼마",
     expects: [
-      "의무마다 주체·행위·기한·제출처·근거조문·위반 제재를 표로",
-      "자문 결론에 그대로 붙일 수 있는 형태",
+      "의무마다 주체·행위·기한·제출처·근거조문을 표로",
+      "제재는 형사벌·과태료·과징금·행정처분을 **구분**해 별도 표로 — 뭉치지 않음",
+      "조문 간 연결(위반→벌칙)은 원문이 명시한 것만, 아니면 '연결 미확인'",
     ],
     form: {
-      intro: "자문 결론의 뼈대가 되는 표를 만듭니다.",
+      intro:
+        "자문 결론의 뼈대가 되는 표를 만듭니다. 제재 금액·벌칙 연결은 조문 원문이 " +
+        "명시한 것만 넣으며, 검증 없이 의견서에 옮기면 안 됩니다.",
       fields: [
         { key: "subject", label: "대상", placeholder: "예: 온라인 식품판매 중개 플랫폼 입점 사업자" },
         { key: "scope", label: "범위 (선택)", placeholder: "예: 영업 개시 전 의무만" },
@@ -269,13 +280,16 @@ const EXPERT: Feature[] = [
       build: (v) =>
         `다음 대상의 법적 의무를 표로 정리해줘.\n\n[대상]\n${slot(v.subject, "대상을 적어 주세요")}` +
         `\n\n[범위]\n${slot(v.scope, "범위")}\n\n` +
-        "각 행에 ① 의무 주체 ② 해야 할 행위 ③ 기한 ④ 제출처·접수기관 ⑤ 근거 조문 " +
-        "⑥ 위반 시 제재(과태료·벌칙 금액까지)를 넣어줘. 제재 금액이 조문에서 " +
-        "확인되지 않으면 '조문 미확인'으로 적고 지어내지 마.",
+        "표 1(의무): ① 의무 주체 ② 해야 할 행위 ③ 기한 ④ 제출처·접수기관 ⑤ 근거 조문.\n" +
+        "표 2(제재): 의무별로 형사벌·과태료·과징금·행정처분을 **각각 다른 열**에 적어줘 — " +
+        "한 칸에 뭉치지 마. 금액·일수는 조문 원문이 명시한 것만 쓰고, 'A조 위반 → B조 " +
+        "벌칙' 연결은 검색 원문이 그 연결을 명시할 때만 적어. 아니면 그 칸은 " +
+        "'연결 미확인'으로 비워 두고 추측하지 마.",
     },
   },
   {
     id: "ordinance_compare",
+    docKinds: ["ordin"],
     category: "지역 비교",
     title: "지자체별 조례 요건 비교",
     subtitle: "같은 사업, 지역마다 다른 요건",
@@ -290,8 +304,7 @@ const EXPERT: Feature[] = [
         { key: "regions", label: "비교할 지역", placeholder: "예: 서울 강남구, 경기 성남시, 부산 해운대구" },
       ],
       build: (v) =>
-        `같은 사업에 대해 지자체별 조례 요건을 비교해줘. 검색은 자치법규 종별` +
-        `(doc_kinds=["ordin"])을 포함해서 해줘.\n\n[사업·행위]\n${slot(v.subject, "무엇에 대한 비교인가요")}` +
+        `같은 사업에 대해 지자체별 조례 요건을 비교해줘.\n\n[사업·행위]\n${slot(v.subject, "무엇에 대한 비교인가요")}` +
         `\n\n[비교할 지역]\n${slot(v.regions, "지역을 적어 주세요")}\n\n` +
         "지역 × 요건(시설·면적·첨부서류·수수료·처리기간)을 표로 만들고, 상위 법령과 " +
         "달라지는 지점을 짚어줘. **조례가 검색되지 않은 지역은 '확인 불가'로 적고 " +
@@ -300,6 +313,7 @@ const EXPERT: Feature[] = [
   },
   {
     id: "interpretation",
+    docKinds: ["expc"],
     category: "유권해석",
     title: "유권해석 · 행정해석 확인",
     subtitle: "조문만으론 안 나오는 집행 기준",
@@ -314,8 +328,7 @@ const EXPERT: Feature[] = [
         { key: "article", label: "관련 조문 (선택)", placeholder: "예: 식품위생법 제37조" },
       ],
       build: (v) =>
-        `다음 쟁점에 관한 유권해석·행정해석을 찾아줘. 검색은 해석례 종별` +
-        `(doc_kinds=["expc"])을 포함해서 해줘.\n\n[쟁점]\n${slot(v.issue, "쟁점을 적어 주세요")}` +
+        `다음 쟁점에 관한 유권해석·행정해석을 찾아줘.\n\n[쟁점]\n${slot(v.issue, "쟁점을 적어 주세요")}` +
         `\n\n[관련 조문]\n${slot(v.article, "조문")}\n\n` +
         "해석기관·회신일자·결론을 표로 정리하고, 해석이 갈리는 부분이 있으면 " +
         "무엇 때문에 갈리는지 짚어줘. 기관과 일자가 확인되지 않는 해석은 쓰지 마.",
@@ -350,6 +363,7 @@ const EXPERT: Feature[] = [
   },
   {
     id: "sanction_level",
+    docKinds: ["admrul_attach", "prec"],
     category: "제재 가늠",
     title: "제재 수위 가늠",
     subtitle: "과태료 · 영업정지 실제 수위",
@@ -400,6 +414,7 @@ const EXPERT: Feature[] = [
   },
   {
     id: "impact_graph",
+    docKinds: ["impact"],
     category: "영향 분석",
     title: "조문 개정 영향 범위",
     subtitle: "이 조문이 바뀌면 같이 흔들리는 곳",

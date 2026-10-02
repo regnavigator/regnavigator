@@ -981,7 +981,9 @@ def _tool_qdrant(args: dict, state: dict, tcid: str) -> ToolExec:
     if top_k is None:
         top_k = int((os.getenv("QDRANT_TOP_K") or "").strip() or "8")
     # LLM 이 종별을 지목한 검색 (판례·해석례 등 보충) — 검증 후 전달.
-    doc_kinds = sanitize_doc_kinds(args.get("doc_kinds"))
+    # 모델이 종별을 지목하지 않았으면 기능 힌트(턴 기본 종별)를 쓴다(2026-10-03).
+    doc_kinds = (sanitize_doc_kinds(args.get("doc_kinds"))
+                 or sanitize_doc_kinds(state.get("default_doc_kinds")))
 
     selected = [k for k in (state.get("selected_law_keys") or []) if k]
     pinned = bool(selected)
@@ -1171,6 +1173,7 @@ async def _inject_searches(
     turn_steps: list[dict],
     sensitive: bool = False,
     hidden: bool = False,
+    doc_kinds: Optional[list[str]] = None,
 ) -> list[dict]:
     """커버리지 게이트(2·3층)가 지시한 겨냥 검색을 직접 실행해 히스토리에 주입.
 
@@ -1208,6 +1211,7 @@ async def _inject_searches(
         tool_state = state.as_tool_state()
         tool_state["thread_id"] = thread_id
         tool_state["user_id"] = user_id
+        tool_state["default_doc_kinds"] = doc_kinds
         return await _exec_tool(tc, tool_state, tc["id"])
 
     results = await asyncio.gather(*(_run(tc) for tc in tool_calls),
@@ -1399,6 +1403,7 @@ async def run_chat_turn(
     confidential: bool = False,  # 기밀 모드 — 온프레미스 전용 처리
     hidden: bool = False,  # 조합 중간 단계 — 채팅에 렌더하지 않는다
     skill_hint: Optional[str] = None,  # "irb_drb" — 프런트 버튼 명시 진입
+    doc_kinds: Optional[list[str]] = None,  # 턴 기본 검색 종별(기능 힌트)
 ) -> AsyncIterator[dict]:
     """한 턴 실행 — 이벤트 dict 스트림.
 
@@ -1424,7 +1429,7 @@ async def run_chat_turn(
                     selected_law_keys=selected_law_keys,
                     model_name=model_name, models=models, emit=_emit,
                     style=style, confidential=confidential, hidden=hidden,
-                    skill_hint=skill_hint,
+                    skill_hint=skill_hint, doc_kinds=doc_kinds,
                 )
         except Exception as e:  # noqa: BLE001 — 스트림에 사용자향 에러 후 종료
             _log.exception("chat_loop turn failed: %s", e)
@@ -1482,6 +1487,7 @@ async def _run_turn(
     confidential: bool = False,  # 기밀 모드 — 온프레미스 전용 처리
     hidden: bool = False,  # 조합 중간 단계 — 채팅에 렌더하지 않는다
     skill_hint: Optional[str] = None,
+    doc_kinds: Optional[list[str]] = None,
 ) -> None:
     # 동기 I/O(SQLite·PII NER HTTP)는 전부 to_thread — 이벤트 루프 점유 방지.
     # (20인 동시 부하 실측에서 /healthz 지연 ~7s 스파이크의 원인이었음.)
@@ -1955,6 +1961,7 @@ async def _run_turn(
                 tool_state = state.as_tool_state()
                 tool_state["thread_id"] = thread_id
                 tool_state["user_id"] = user_id
+                tool_state["default_doc_kinds"] = doc_kinds
                 result = await asyncio.to_thread(
                     _tool_tavily, {"query": _web_query_text(scrubbed)}, tool_state,
                     inj_tcid, built)
@@ -2032,7 +2039,8 @@ async def _run_turn(
                         "chat_loop: 커버리지 게이트 — 겨냥 검색 %d건 주입", len(searches))
                     turn_steps = await _inject_searches(
                         searches[:2], state, repo, thread_id, user_id, emit,
-                        turn_steps, sensitive=confidential, hidden=hidden)
+                        turn_steps, sensitive=confidential, hidden=hidden,
+                        doc_kinds=doc_kinds)
                     continue
             except Exception as e:  # noqa: BLE001 — 게이트 실패가 답변을 막으면 안 됨
                 _log.info("coverage gate skipped: %s", e)
@@ -2067,6 +2075,7 @@ async def _run_turn(
             # 검색 수집 이벤트(rag_search)에 사용자·스레드 컨텍스트 부착용
             tool_state["thread_id"] = thread_id
             tool_state["user_id"] = user_id
+            tool_state["default_doc_kinds"] = doc_kinds
             # 스킬 세션(턴 로컬) — _exec_tool 의 load_skill 분기가 사용
             tool_state["skill_session"] = skill_session
             # 참조 자동 로드 매칭용 질문(마스킹본) — chat_integration._match_auto_refs
@@ -2210,8 +2219,12 @@ async def _run_turn(
     # 뿐 부착 코드가 없었다 — 2턴째부터, 복사본에는, 면책이 없었다. 법령 근거로
     # 답한 턴(인용 ≥1)마다 붙인다. 프롬프트 지시는 삭제했다(이중 부착 방지).
     if body and _turn_citation_count(turn_steps) > 0:
-        from src.legal import append_chat_disclaimer
+        from src.legal import append_chat_disclaimer, append_feature_caveat
 
+        # 기능별 한계 고지(2026-10-03) — 프롬프트가 아니라 코드가 붙인다. 영향
+        # 범위·인용 검증·조례 비교처럼 "빠진 것이 있을 수 있다"가 산출물의 핵심
+        # 한계인 기능은, 모델이 그 말을 빼먹으면 변호사가 목록을 완결로 읽는다.
+        body = append_feature_caveat(body, doc_kinds)
         body = append_chat_disclaimer(body)
         emit({"type": "token", "text": "", "message_id": getattr(ai, "id", None)})
 

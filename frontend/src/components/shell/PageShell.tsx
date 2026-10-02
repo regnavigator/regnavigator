@@ -228,6 +228,7 @@ function PageShellInner() {
             hidden: true,
             confidential: st.confidential,
             workflowFileIds: st.files.map((x) => x.id),
+            docKinds: f.docKinds,
           });
           const ok = await waitIdle();
           if (!ok) break;
@@ -990,6 +991,7 @@ function ChatColumn({
       text: string,
       attachments?: ChatAttachmentPayload[],
       skillHint?: string | null,
+      docKinds?: string[],
     ) => {
       // `@feedback ...` 인터셉트 — 채팅 send 안 함, /feedback/general POST.
       const fbMatch = text.match(/^@feedback\s+/i);
@@ -1058,7 +1060,7 @@ function ChatColumn({
         }
         return;
       }
-      await send(text, { attachments, skillHint });
+      await send(text, { attachments, skillHint, docKinds });
     },
     [configured, threadId, send, state.turns, onMissingConfig, setShellError, clearShellError, setThreadIdQuery, pathname, router],
   );
@@ -1260,8 +1262,8 @@ function ChatColumn({
               prefill={draftPrefill}
               onPrefillConsumed={() => setDraftPrefill(null)}
               onOpenComposer={onOpenComposer}
-              onSend={(t, atts, hint) =>
-                withViewTransitionAsync(() => void handleSend(t, atts, hint))
+              onSend={(t, atts, hint, dk) =>
+                withViewTransitionAsync(() => void handleSend(t, atts, hint, dk))
               }
               onStop={stop}
             />
@@ -1398,7 +1400,7 @@ function ChatColumn({
               prefill={draftPrefill}
               onPrefillConsumed={() => setDraftPrefill(null)}
               onOpenComposer={onOpenComposer}
-              onSend={(t, atts, hint) => void handleSend(t, atts, hint)}
+              onSend={(t, atts, hint, dk) => void handleSend(t, atts, hint, dk)}
               onStop={stop}
               onManualReport={canManualReport ? handleManualReport : undefined}
             />

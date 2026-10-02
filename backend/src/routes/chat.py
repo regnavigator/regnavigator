@@ -108,6 +108,10 @@ class ChatRequest(BaseModel):
     # `attachments` 에 합친다. **텍스트를 브라우저로 되돌리지 않는다** — 사건
     # 파일이 다시 네트워크를 타는 왕복을 없애고, 기밀 단계에서 특히 중요하다.
     workflow_file_ids: list[str] | None = None
+    # 검색 종별 힌트(2026-10-03). 종전엔 기능 프롬프트가 사용자 입력창에
+    # `doc_kinds=["prec"]` 를 평문으로 박았다 — 내부 파라미터가 노출되고, 사용자가
+    # 지우면 기능이 조용히 달라졌다. 구조화 필드로 받아 턴의 기본 종별로 쓴다.
+    doc_kinds: list[str] | None = None
 
 
 def _max_attachments() -> int:
@@ -259,6 +263,7 @@ async def chat(req: ChatRequest, request: Request):
                 confidential=confidential,
                 hidden=hidden,
                 skill_hint=req.skill_hint if req.skill_hint == "irb_drb" else None,
+                doc_kinds=req.doc_kinds,
             ).__aiter__()
             while True:
                 nxt = asyncio.ensure_future(agen.__anext__())

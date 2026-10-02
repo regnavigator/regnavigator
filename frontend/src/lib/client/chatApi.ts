@@ -123,6 +123,8 @@ export async function streamChatEvents(
     hidden?: boolean;
     /** 조합 첨부 id — 서버가 본문을 꺼내 합친다 */
     workflow_file_ids?: string[] | null;
+    /** 턴 기본 검색 종별 — 기능 힌트(2026-10-03) */
+    doc_kinds?: string[] | null;
   },
   opts: { signal?: AbortSignal },
   onEvent: (ev: ChatSseEvent) => void,

@@ -783,6 +783,8 @@ export async function runStream(
     confidential?: boolean;
     /** 조합 첨부 id — 서버가 본문을 꺼내 합친다 */
     workflowFileIds?: string[];
+    /** 턴 기본 검색 종별(기능 힌트) */
+    docKinds?: string[];
     inactivityTimeoutMs?: number;
   },
   handlers: StreamHandlers,
@@ -968,6 +970,7 @@ export async function runStream(
           confidential: options.confidential ?? getConfidential(threadId),
           hidden: options.hidden ?? false,
           workflow_file_ids: options.workflowFileIds ?? null,
+          doc_kinds: options.docKinds ?? null,
         },
         { signal: innerAc.signal },
         onEvent,

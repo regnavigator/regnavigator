@@ -76,6 +76,7 @@ type Props = {
     text: string,
     attachments?: ExtractedAttachment[],
     skillHint?: string | null,
+    docKinds?: string[],
   ) => void;
   /** 정지. running=true 일 때 호출됨. */
   onStop: () => void;
@@ -183,7 +184,10 @@ export function ChatInput({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   /** 기능 피커가 조립한 템플릿을 입력창에 넣는다 — 자동 전송하지 않는다. */
-  const applyPrefill = useCallback((text: string) => {
+  // 기능 힌트(검색 종별) — 프리필과 함께 와서 **그 전송 한 번**에만 실린다.
+  const pendingHintRef = useRef<{ docKinds?: string[] } | null>(null);
+  const applyPrefill = useCallback((text: string, hint?: { docKinds?: string[] }) => {
+    pendingHintRef.current = hint ?? null;
     setValue(text);
     requestAnimationFrame(() => {
       const el = textareaRef.current;
@@ -224,10 +228,13 @@ export function ChatInput({
     }
     // 첨부만 있고 질문이 없으면 기본 요청문 — 백엔드 message 는 비울 수 없다.
     if (!text) text = "첨부한 문서를 검토해 주세요.";
+    const hint = pendingHintRef.current;
+    pendingHintRef.current = null;
     onSend(
       text,
       attachments.length ? attachments : undefined,
       null,
+      hint?.docKinds,
     );
     setValue("");
     setAttachments([]);

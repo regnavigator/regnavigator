@@ -84,3 +84,48 @@ def test_chat_turn_attaches_disclaimer_only_with_citations(monkeypatch, has_cite
     asyncio.run(run())
     assert (DISCLAIMER_CHAT in (done.get("text") or "")) is expect
     monkeypatch.setattr(TR, "_repo", None)
+
+
+# ── 기능별 한계 고지 — 결정적 부착 (2026-10-03 감사 L3·L5·L8) ─────────────
+
+from src.legal import FEATURE_CAVEAT_MARK, append_feature_caveat
+
+
+def test_feature_caveat_for_known_kinds():
+    out = append_feature_caveat("본문", ["ordin"])
+    assert FEATURE_CAVEAT_MARK in out and "자치법규는" in out
+    assert append_feature_caveat(out, ["ordin"]) == out  # 멱등
+
+
+def test_feature_caveat_skips_unknown_or_empty():
+    assert append_feature_caveat("본문", ["law"]) == "본문"
+    assert append_feature_caveat("본문", None) == "본문"
+    assert append_feature_caveat("", ["prec"]) == ""
+
+
+def test_feature_caveat_joins_multiple():
+    out = append_feature_caveat("본문", ["admrul_attach", "prec"])
+    assert "판례 코퍼스는" in out and out.count(FEATURE_CAVEAT_MARK) == 1
+
+
+def test_doc_kinds_hint_reaches_qdrant_tool(monkeypatch):
+    """프런트 힌트(doc_kinds)가 모델이 종별을 안 고르면 기본 종별로 쓰인다."""
+    from src import chat_loop as cl
+
+    seen = {}
+
+    def fake_run(query, top_k=None, target_types=None, **kw):
+        seen["kinds"] = target_types
+        from src.tools.search import QdrantCore
+        return QdrantCore(hits=[], citations=[], tool_text="", final_keys=[])
+
+    monkeypatch.setattr("src.chat_loop.run_qdrant", fake_run)
+    monkeypatch.setattr(cl, "step_start", lambda *a, **k: ("sid", 0))
+    monkeypatch.setattr(cl, "step_done", lambda *a, **k: {})
+    state = {"selected_law_keys": [], "steps": [], "messages": [],
+             "default_doc_kinds": ["expc"]}
+    try:
+        cl._tool_qdrant({"query": "q"}, state, "tc")
+    except Exception:
+        pass  # 더블이 거친 부분은 상관없다 — 종별 전달만 본다
+    assert seen.get("kinds") == ["expc"]

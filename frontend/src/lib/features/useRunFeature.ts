@@ -25,7 +25,7 @@ import {
 export function useRunFeature(opts: {
   mode: AppMode | null;
   /** 조립된 프롬프트를 입력창에 넣는다. 자동 전송하지 않는다 — 편집할 수 있어야 한다. */
-  onPrefill?: (text: string) => void;
+  onPrefill?: (text: string, hint?: { docKinds?: string[] }) => void;
   /** 기밀 토글의 스레드 키(2026-10-03). `/new` 면 null → 전역 키 */
   threadId?: string | null;
 }) {
@@ -58,9 +58,9 @@ export function useRunFeature(opts: {
         if (feature.form) {
           const cleaned: Record<string, string> = {};
           for (const [k, v] of Object.entries(values)) cleaned[k] = (v ?? "").trim();
-          onPrefill(lead + feature.form.build(cleaned));
+          onPrefill(lead + feature.form.build(cleaned), { docKinds: feature.docKinds });
         } else {
-          onPrefill(lead + feature.title);
+          onPrefill(lead + feature.title, { docKinds: feature.docKinds });
         }
       }
 

@@ -107,7 +107,7 @@ export function FeatureCards({
                 <span
                   role="tooltip"
                   data-tooltip={f.title}
-                  className="pointer-events-none absolute left-full top-1/2 z-20 ml-3 hidden w-[260px] -translate-y-1/2 rounded-[10px] border border-md-outline-variant bg-md-surface-container-lowest px-3 py-2 opacity-0 shadow-lg transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100 lg:block"
+                  className="pointer-events-none absolute left-0 top-full z-20 mt-1 w-full rounded-[10px] border border-md-outline-variant bg-md-surface-container-lowest px-3 py-2 opacity-0 shadow-lg transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100 group-active:opacity-100 lg:left-full lg:top-1/2 lg:ml-3 lg:mt-0 lg:w-[260px] lg:-translate-y-1/2"
                 >
                   <span className="mb-1 block text-[10.5px] font-semibold tracking-[0.02em] text-md-on-surface-variant">
                     {f.category}
