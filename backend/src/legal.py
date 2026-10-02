@@ -20,7 +20,7 @@ from __future__ import annotations
 
 # 고지 개정 시 올린다(프런트 재동의 트리거).
 # 2026-07-16: 약관·개인정보처리방침 전면 개정(법령 정식 명칭·보수적 표현·주석 제거).
-LEGAL_VERSION = "2026-07-16"
+LEGAL_VERSION = "2026-10-03"  # 서비스명 정정·보호책임자·국외이전 연락처·기밀 경로·사업자 정보 — 재동의
 
 # ── 채팅 — 세션 첫 법령 응답에 1회(프롬프트가 이 문구를 그대로 사용) ──────
 DISCLAIMER_CHAT = (
@@ -30,6 +30,28 @@ DISCLAIMER_CHAT = (
 )
 
 # ── 보고서 — 본문 끝에 시스템이 강제 부착 ────────────────────────────────
+#: 본문 끝에 면책을 붙일 때의 구분자 — 프런트가 이 뒤를 작은 글씨로 렌더한다.
+CHAT_DISCLAIMER_SEP = "\n\n---\n"
+
+
+def append_chat_disclaimer(body: str) -> str:
+    """채팅 답변 본문 끝에 `DISCLAIMER_CHAT` 을 결정적으로 붙인다(멱등)."""
+    if not body:
+        return body
+    if DISCLAIMER_CHAT.strip()[:20] in body:
+        return body  # 이미 있음(LLM 이 붙였거나 재부착)
+    return body.rstrip() + CHAT_DISCLAIMER_SEP + DISCLAIMER_CHAT
+
+
+def append_report_disclaimer(body: str) -> str:
+    """보고서·의견서 본문 끝에 `DISCLAIMER_REPORT` 를 결정적으로 붙인다(멱등)."""
+    if not body:
+        return body
+    if "법률자문 또는 관할기관의 유권해석이 아닙니다" in body:
+        return body
+    return body.rstrip() + "\n\n" + DISCLAIMER_REPORT.strip() + "\n"
+
+
 DISCLAIMER_REPORT = """
 ---
 

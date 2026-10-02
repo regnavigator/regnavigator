@@ -38,7 +38,7 @@ const PIPELINE = [
   { num: "01", title: "질문 입력", desc: "자연어로 자유롭게. PII 마스킹·의도 판정 후 검색으로 넘어갑니다." },
   { num: "02", title: "법령 검색 (강제)", desc: "규제 질의는 항상 법령·고시·판례 코퍼스와 웹을 의미 기반으로 검색." },
   { num: "03", title: "답변 + 인용", desc: "확보한 근거로 스트리밍. 문장마다 [n] 인용 마커를 붙입니다." },
-  { num: "04", title: "grounding 검증", desc: "인용을 원문과 대조해 신뢰도 배지로 표시. 지어낸 근거를 차단." },
+  { num: "04", title: "인용 확인", desc: "인용한 문장이 법령 원문에 실제로 있는지 확인해 배지로 표시. 확인되지 않은 인용은 미검증으로 남깁니다." },
 ];
 
 
@@ -346,12 +346,11 @@ export default function LandingPage() {
                 <tr className="border-t border-md-outline-variant/60">
                   <td className="px-6 py-4 align-top font-semibold">웹 인용</td>
                   <td className="px-6 py-4 align-top text-md-on-surface-variant">
-                    원문 대조가 불가하므로 발행처로 판단. 정부·공공기관(law.go.kr,
-                    mfds.go.kr 등)이면 검증으로 간주합니다.
+                    원문 대조 대상이 아닙니다. 발행처와 함께 표시되며 검증 비율
+                    계산에 들어가지 않습니다.
                   </td>
                   <td className="px-6 py-4 align-top text-md-on-surface-variant">
-                    공공기관이면 <b className="text-md-primary">검증됨</b>, 아니면{" "}
-                    <b>미검증</b>.
+                    항상 <b>참고</b> — 검증됨으로 표시하지 않습니다.
                   </td>
                 </tr>
               </tbody>

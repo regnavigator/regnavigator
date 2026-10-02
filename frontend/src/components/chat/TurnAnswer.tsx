@@ -123,7 +123,8 @@ export function TurnAnswer({ answer, streaming = false, pathway = null }: Props)
     <CiteHighlightProvider>
     <section aria-label="답변" className="group/answer flex flex-col gap-3">
       {!streaming ? <ConfidenceBadge citations={answer.citations} /> : null}
-      <div className={"relative" + (streaming ? " ink-stream" : "")}>
+      {/* 본문 끝 `---` 뒤 면책(시스템 부착, 2026-10-03)은 작은 회색으로 — `[&_hr+p]` */}
+      <div className={"relative [&_hr+p]:mt-2 [&_hr+p]:text-[12px] [&_hr+p]:leading-relaxed [&_hr+p]:text-md-on-surface-variant" + (streaming ? " ink-stream" : "")}>
         <MarkdownContent
           content={answer.content}
           citations={streaming ? [] : answer.citations}

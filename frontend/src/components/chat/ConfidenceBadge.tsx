@@ -34,11 +34,13 @@ export function ConfidenceBadge({ citations }: Props) {
     else if (c.status === "amended_pending") amended += 1;
   }
 
-  const hasVerifiedField = citations.some(
-    (c) => typeof c.verified === "boolean",
-  );
-  const verified = citations.filter((c) => c.verified === true).length;
-  const ratio = hasVerifiedField ? verified / total : null;
+  // 분모는 **검증 대상**(verified 필드가 있는 인용)만(2026-10-03). 종전엔 웹 인용
+  // 까지 전체를 분모로 넣어, 법령 4건 전부 검증 + 웹 6건이면 40% → "보통",
+  // 반대로 법령 1건만 걸리면 100% → "높음"이 됐다.
+  const verifiable = citations.filter((c) => typeof c.verified === "boolean");
+  const hasVerifiedField = verifiable.length > 0;
+  const verified = verifiable.filter((c) => c.verified === true).length;
+  const ratio = hasVerifiedField ? verified / verifiable.length : null;
 
   const tier =
     ratio === null ? "none" : ratio >= 0.8 ? "high" : ratio >= 0.3 ? "medium" : "low";
@@ -118,8 +120,9 @@ export function ConfidenceBadge({ citations }: Props) {
         </p>
         {ratio !== null ? (
           <p className="mt-2 text-md-on-surface-variant">
-            <span className="font-medium text-md-on-surface">검증 {verified}/{total}</span>{" "}
-            — 인용 문장을 <b>법령 원문과 대조 확인</b>한 건수(웹 출처는 화이트리스트 매칭). 미검증은 참고용.
+            <span className="font-medium text-md-on-surface">확인 {verified}/{verifiable.length}</span>{" "}
+            — 인용한 문장이 <b>법령 원문에 실제로 있는지</b> 확인한 건수. 법적 결론의
+            옳고 그름을 검증한 것은 아닙니다. 웹 출처는 대상 아님(참고).
           </p>
         ) : null}
         {revoked || amended ? (

@@ -52,6 +52,22 @@ function StartInner() {
   }, [ready, forcePick, mode, router]);
 
   const choose = (m: AppMode) => {
+    // 전문가 모드는 **법률 업무 종사자용**이다(2026-10-03). 자격 확인 절차 없이
+    // 누구나 들어와 의견서 초안을 뽑아 제3자에게 주면 서비스가 변호사법 §109
+    // 위반의 수단이 된다. 최소 장치: 자기선언 + 기록. 인증은 후속 과제.
+    if (m === "expert") {
+      const ok = window.confirm(
+        "전문가 모드는 변호사·법무 담당자 등 법률 업무 종사자를 위한 도구입니다.\n" +
+        "산출물은 참고 자료이며, 제3자에게 법률 자문으로 제공할 수 없습니다.\n\n" +
+        "해당 업무 종사자로서 이용하시겠습니까?",
+      );
+      if (!ok) return;
+      try {
+        window.localStorage.setItem("regnav_expert_ack", new Date().toISOString());
+      } catch {
+        /* 무시 */
+      }
+    }
     setPicking(m);
     setMode(m);
     router.push(MODE_META[m].href);

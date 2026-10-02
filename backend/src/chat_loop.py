@@ -2204,6 +2204,17 @@ async def _run_turn(
     # 검증 불가 링크·연락처 backstop(B) — 프롬프트 가드(A)를 뚫은 지어낸 URL/전화
     # 감지 시 *내부 신호만*(log + events). 사용자엔 경고 안 함(자기모순 회피) — 삭제도
     # 안 함(오탐 위험). 어드민이 발생률을 관측해 가드/레지스트리 튜닝 근거로 쓴다.
+    # 면책 — **시스템이 결정적으로 부착**한다(2026-10-03). `legal.py` 가 처음부터
+    # 그 원칙을 선언했는데("LLM 이 매번 작성하면 표현이 흔들리고 누락될 수 있다"),
+    # 실제로는 supervisor 프롬프트가 LLM 에게 "세션 최초 1회 덧붙여라"고 지시할
+    # 뿐 부착 코드가 없었다 — 2턴째부터, 복사본에는, 면책이 없었다. 법령 근거로
+    # 답한 턴(인용 ≥1)마다 붙인다. 프롬프트 지시는 삭제했다(이중 부착 방지).
+    if body and _turn_citation_count(turn_steps) > 0:
+        from src.legal import append_chat_disclaimer
+
+        body = append_chat_disclaimer(body)
+        emit({"type": "token", "text": "", "message_id": getattr(ai, "id", None)})
+
     _unverified = _detect_unverified_contacts(state, turn_steps, body)
     if _unverified:
         _log.warning(

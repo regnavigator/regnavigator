@@ -1149,6 +1149,11 @@ async def create_document_from_brief(request: Request,
         body = compose_from_thread(state.messages, cites, title=title)
     else:
         body = skeleton(title)
+    # 면책 결정적 부착(2026-10-03) — 가장 민감한 산출물(의견서)만 면책 없이 Word 로
+    # 나가고 있었다. 심층 보고서는 `report_pipeline` 이 처음부터 붙였다.
+    from src.legal import append_report_disclaimer
+
+    body = append_report_disclaimer(body)
 
     report_id = f"doc_{uuid.uuid4().hex[:16]}"
     blob_uri = await asyncio.to_thread(

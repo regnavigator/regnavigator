@@ -76,9 +76,14 @@ def test_writer_prompt_forbids_writing_disclaimer():
     assert "법적 고지" not in p        # 면책을 쓰라는 지시가 없어야 함
 
 
-def test_chat_disclaimer_verbatim_in_supervisor_prompt():
-    """채팅 면책은 정본 문구를 그대로 쓰도록 지시(임의 변경 금지)."""
+def test_chat_disclaimer_not_delegated_to_llm():
+    """채팅 면책은 **시스템이** 붙인다(2026-10-03) — 프롬프트는 쓰지 말라고만 한다.
+
+    종전 테스트는 프롬프트에 정본 문구가 그대로 있는지 봤다. 그게 바로 결함이었다:
+    `legal.py` 는 "결정적 부착"을 선언했는데 부착 코드는 없고 LLM 지시뿐이라
+    2턴째부터·복사본에 면책이 없었다. 지금은 `append_chat_disclaimer` 가 붙인다.
+    """
     import io
     p = io.open("src/prompts/supervisor.py", encoding="utf-8").read()
-    assert "법령은 개정될 수 있으므로 시행일·경과규정을 확인하시고" in p
-    assert "임의로 바꾸거나 요약하지 말 것" in p
+    assert "법령은 개정될 수 있으므로 시행일·경과규정을 확인하시고" not in p
+    assert "쓰지 않는다" in p
