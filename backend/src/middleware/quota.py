@@ -105,7 +105,11 @@ def usage_summary(user_id: str) -> dict:
 _QUOTA_PATH_PATTERNS = (
     "/chat",      # 자체 SSE 채팅 루프 (ADR-0001 Phase 1)
     "/reports",   # POST /reports 보고서 트리거 (Phase 3) — GET 류는 아래에서 제외
+    "/monitor",   # 관찰 추천(LLM) — 2026-10-03 전까지 쿼터 밖이었다
 )
+
+#: LLM 을 부르는데 쿼터 밖이던 사이드 엔드포인트(2026-10-03 감사 R1).
+_QUOTA_POST_SUFFIXES = ("/auto-title", "/workflow/suggest", "/watch/recommend", "/polish")
 
 
 def _is_quota_path(path: str, method: str = "GET") -> bool:
@@ -113,13 +117,11 @@ def _is_quota_path(path: str, method: str = "GET") -> bool:
         return False
     if path == "/chat":
         return method.upper() == "POST"  # 자체 SSE 루프 — LLM 호출
-    if path.startswith("/chat/"):
-        # LLM 을 부르는 건 auto-title 뿐 — 목록/state 조회는 쿼터 초과여도 허용
-        # (초과 사용자가 자기 대화를 못 여는 것 방지).
-        return path.endswith("/auto-title") and method.upper() == "POST"
     if path == "/reports":
         return method.upper() == "POST"  # 트리거만 — 목록/메타 GET 은 제외
-    return False  # /reports/{id}·/reports/{id}/download 등 조회
+    # 목록/state/다운로드 조회는 쿼터 초과여도 허용(초과 사용자가 자기 대화를 못
+    # 여는 것 방지). LLM 을 부르는 POST 만 — auto-title·입력 제안·관찰 추천·다듬기.
+    return method.upper() == "POST" and path.endswith(_QUOTA_POST_SUFFIXES)
 
 
 class QuotaMiddleware(BaseHTTPMiddleware):

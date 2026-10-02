@@ -298,7 +298,9 @@ services:
       CSP: ${CSP:-}
       # 신뢰 프록시 홉 수. 0=X-Forwarded-For 무시(위조로 IP 한도 우회 방지).
       # nginx 리버스 프록시 1단이면 1 로.
-      TRUSTED_PROXY_HOPS: ${TRUSTED_PROXY_HOPS:-0}
+      # 운영은 nginx 뒤(OPERATIONS.md §1). 0 이면 client.host 가 전부 프록시 IP 라
+      # **전 트래픽이 1개 rate-limit 버킷** — 정상 사용자끼리 서로를 429 로 막는다(감사 R2).
+      TRUSTED_PROXY_HOPS: ${TRUSTED_PROXY_HOPS:-1}
 
       # === 튜닝 노브 (레지스트리 등록분) ===
       REPORTS_SQLITE_PATH: ${REPORTS_SQLITE_PATH:-./medi_reports.db}
@@ -500,11 +502,22 @@ services:
               echo "[backup] $$DB 실패(미존재/오류) — 스킵"; rm -f "$$F"
             fi
           done
-          find /backups -name '*.sql.gz' -mtime +${BACKUP_RETENTION_DAYS:-14} -delete
+          # 보고서·의견서 본문(blob)도 같이(2026-10-03). DB 에는 blob_uri 만 있어
+          # DB 만 복구하면 전 보고서가 깨진 포인터였다(감사 I2).
+          if [ -d /blobs ]; then
+            B=/backups/blobs_$${TS}.tar.gz
+            if tar -czf "$$B" -C /blobs . 2>/dev/null; then
+              echo "[backup] $$B ($(stat -c%s "$$B") bytes)"
+            else
+              echo "[backup] blobs 실패 — 스킵"; rm -f "$$B"
+            fi
+          fi
+          find /backups \( -name '*.sql.gz' -o -name 'blobs_*.tar.gz' \) -mtime +${BACKUP_RETENTION_DAYS:-14} -delete
           sleep "${BACKUP_INTERVAL_S:-86400}"
         done
     volumes:
       - backups:/backups
+      - blob_data:/blobs:ro
     depends_on:
       postgres: { condition: service_healthy }
     logging:

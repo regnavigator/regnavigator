@@ -717,13 +717,15 @@ class PostgresThreadsRepo:
             if user_id is None:
                 cur.execute(
                     "SELECT id, user_id, title, created_at, updated_at, "
-                    "COALESCE(pinned, FALSE) AS pinned FROM chat_threads "
+                    "COALESCE(pinned, FALSE) AS pinned, COALESCE(kind, 'chat') AS kind "
+                    "FROM chat_threads "
                     "ORDER BY pinned DESC, updated_at DESC LIMIT %s", (limit,),
                 )
             else:
                 cur.execute(
                     "SELECT id, user_id, title, created_at, updated_at, "
-                    "COALESCE(pinned, FALSE) AS pinned FROM chat_threads WHERE user_id = %s "
+                    "COALESCE(pinned, FALSE) AS pinned, COALESCE(kind, 'chat') AS kind "
+                    "FROM chat_threads WHERE user_id = %s "
                     "ORDER BY pinned DESC, updated_at DESC LIMIT %s", (user_id, limit),
                 )
             rows = cur.fetchall()
@@ -847,6 +849,13 @@ class PostgresThreadsRepo:
             return
         from . import _pg
         with _pg.pg_cursor(self.dsn) as cur:
+            # 스레드 행을 잠가 **같은 스레드의 동시 append 를 직렬화**한다(2026-10-03).
+            # 종전엔 MAX(seq) 읽기와 INSERT 사이에 아무 보호가 없었다 — 보고서 잡과
+            # 채팅 턴이 "진짜 병렬"(report_runner 주석)이라 seq 충돌·tool_use↔
+            # tool_result 짝 파손이 운영에서만 났다(SQLite 는 self._lock 이 덮어
+            # 테스트로 절대 재현 불가). pg_cursor 는 autocommit 이라 BEGIN 을 명시한다.
+            cur.execute("BEGIN")
+            cur.execute("SELECT 1 FROM chat_threads WHERE id = %s FOR UPDATE", (thread_id,))
             cur.execute(
                 "SELECT COALESCE(MAX(seq), -1) AS mx FROM chat_messages "
                 "WHERE thread_id = %s",
@@ -870,6 +879,7 @@ class PostgresThreadsRepo:
                 "UPDATE chat_threads SET updated_at = NOW() WHERE id = %s",
                 (thread_id,),
             )
+            cur.execute("COMMIT")
 
     def message_created_at(self, thread_id: str) -> dict[str, str]:
         from . import _pg
@@ -905,13 +915,16 @@ class PostgresThreadsRepo:
             return
         from . import _pg
         with _pg.pg_cursor(self.dsn) as cur:
+            # read-modify-write 를 행 잠금으로 보호(2026-10-03) — 채팅 턴과 보고서
+            # 잡이 같은 step 을 동시에 merge 하면 한쪽 필드가 조용히 사라졌다.
+            cur.execute("BEGIN")
             for s in steps:
                 sid = s.get("id")
                 if not sid:
                     continue
                 cur.execute(
                     "SELECT data_json FROM chat_steps "
-                    "WHERE thread_id = %s AND step_id = %s",
+                    "WHERE thread_id = %s AND step_id = %s FOR UPDATE",
                     (thread_id, sid),
                 )
                 row = cur.fetchone()
@@ -927,6 +940,7 @@ class PostgresThreadsRepo:
                         merged.get("ts", merged.get("ended_at")),
                     ),
                 )
+            cur.execute("COMMIT")
 
 
 # ── factory ─────────────────────────────────────────────────────────

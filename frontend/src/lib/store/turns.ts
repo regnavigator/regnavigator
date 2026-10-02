@@ -38,7 +38,7 @@ const PII_LABELS: Record<string, string> = {
 
 // 마스킹 placeholder 전체(정렬용) — backend pii.py + gate.py 의 치환 토큰.
 const PII_PLACEHOLDER_RE =
-  /\[(이름|주소|생년월일|나이|이메일|지갑주소|주민등록번호|사업자번호|카드번호|전화번호|여권번호|IP주소|차량번호)\]/g;
+  /\[(이름|주소|생년월일|나이|이메일|지갑주소|주민등록번호|사업자번호|카드번호|전화번호|여권번호|IP주소|차량번호|계좌번호)\]/g;
 // 오탐 신고 가능한 placeholder — NER 판정분(이름·주소류)만. 전화번호·주민번호
 // 등 regex 확정분은 신고 대상이 아니다(서버도 422 로 거부).
 const PII_REPORTABLE = new Set(["[이름]", "[주소]", "[생년월일]", "[나이]"]);
