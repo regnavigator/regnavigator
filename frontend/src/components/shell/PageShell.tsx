@@ -496,6 +496,11 @@ function PageShellInner() {
   const showRightPanel = Boolean(rightMode) && rpOpen;
   // 기능연계 패널(2026-10-05) — 근거 패널과 독립. 전문가 전용.
   const showComposerPanel = composer && showPro && mode !== "monitor";
+  // 폭 배분(2026-10-06): 좌측 16% 고정, 기능연계 18%. 남은 폭을 채팅:근거 = **2:1** 로
+  // 나눈다 — 기능연계가 열리든 닫히든 비율이 같아야 한다.
+  const sideSpace = 100 - 16 - (showComposerPanel ? 18 : 0);
+  const sideRight = Math.round(sideSpace / 3);
+  const sideChat = sideSpace - sideRight;
 
   /** 대화에 나온 서식 인용 전부 — form_find 가 목록으로 보여 준다(파일 업로드 대신). */
   const formCitations = useMemo<FormCitation[]>(
@@ -763,7 +768,7 @@ function PageShellInner() {
           // 신호 등)이면 그 시각이 그대로 노출됨. **autoSaveId를 closed 케이스에도
           // 동일 모드값으로 고정** — 닫힌 상태에선 어차피 우측 Panel을 mount 안 하므로
           // 폭 persist에 무관. group은 한 ID로 유지 → mode 토글 없이는 remount X.
-          autoSaveId={`root-${rightMode === "artifact" ? "artifact-v2" : "side-v4"}${showComposerPanel ? "-f" : ""}`}
+          autoSaveId={`root-${rightMode === "artifact" ? "artifact-v2" : "side-v5"}${showComposerPanel ? "-f" : ""}`}
           className="h-full w-full"
         >
           {(threadsOpen || threadsClosing) && (
@@ -802,10 +807,10 @@ function PageShellInner() {
             order={2}
             defaultSize={
               !showRightPanel
-                ? showComposerPanel ? 66 : 84
+                ? sideSpace
                 : rightMode === "artifact"
-                  ? showComposerPanel ? 38 : 56 // artifact: 우측 44%
-                  : showComposerPanel ? 44 : 62 // side(citation·reports·deep·split): 우측 22% (2026-10-06, 종전 36%의 60%)
+                  ? sideSpace - 44 // artifact(문서 뷰어): 우측 44%
+                  : sideChat // side(citation·reports·deep·split): 채팅:근거 = 2:1
             }
             minSize={30}
           >
@@ -844,8 +849,8 @@ function PageShellInner() {
               <Panel
                 id="right"
                 order={3}
-                defaultSize={rightMode === "artifact" ? 44 : 22}
-                minSize={16}
+                defaultSize={rightMode === "artifact" ? 44 : sideRight}
+                minSize={14}
                 maxSize={55}
                 className={
                   "border-l border-md-outline-variant transition-colors duration-[var(--motion-fast)] " +
