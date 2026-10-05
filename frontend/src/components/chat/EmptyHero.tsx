@@ -12,6 +12,8 @@
  */
 
 import { useMemo, useState } from "react";
+
+import type { TaskTemplate } from "@/lib/client/taskTemplates";
 import { useMode } from "@/components/providers/ModeProvider";
 import { useSession } from "next-auth/react";
 import { FeatureCards } from "@/components/feature/FeatureCards";
@@ -31,9 +33,14 @@ function getTimeGreeting(): string {
 type Props = {
   configured: boolean;
   onPickPrompt?: (text: string, hint?: { docKinds?: string[] }) => void;
+  /** 저장된 직무(2026-10-06) — 있으면 타일 맨 앞에 "내 직무"로 선다 */
+  templates?: TaskTemplate[];
+  onPickTemplate?: (t: TaskTemplate) => void;
 };
 
-export function EmptyHero({ configured, onPickPrompt }: Props) {
+const TEMPLATE_PREFIX = "task:";
+
+export function EmptyHero({ configured, onPickPrompt, templates, onPickTemplate }: Props) {
   const { data: session } = useSession();
   // 고른 카드 — 공용 템플릿 모달이 받는다(2026-10-02 레지스트리 분리).
   const [picked, setPicked] = useState<Feature | null>(null);
@@ -47,8 +54,21 @@ export function EmptyHero({ configured, onPickPrompt }: Props) {
 
   const { mode, showPro } = useMode();
   // 카드 정의는 레지스트리가 단일 출처 — 스레드 내 피커와 같은 목록을 쓴다.
-  const features = useMemo(
-    () => featuresFor({ mode, hasTurns: false }), [mode]);
+  const features = useMemo(() => {
+    const base = featuresFor({ mode, hasTurns: false });
+    if (!templates?.length || !onPickTemplate) return base;
+    // 직무를 Feature 모양으로 — Feature 타입은 건드리지 않는다. id 접두사로 구분.
+    const taskTiles: Feature[] = templates.map((t) => ({
+      id: `${TEMPLATE_PREFIX}${t.id}`,
+      category: "내 직무",
+      title: t.name,
+      subtitle: `${t.steps.length}단계 연계`,
+      expects: [],
+    }));
+    return [...taskTiles, ...base];
+  }, [mode, templates, onPickTemplate]);
+  const templateById = useMemo(
+    () => new Map((templates ?? []).map((t) => [`${TEMPLATE_PREFIX}${t.id}`, t])), [templates]);
   // 첫 화면은 스레드가 아직 없다 → 전역 키. 첫 전송 때 adoptConfidential 이 옮긴다.
   const run = useRunFeature({ mode, onPrefill: onPickPrompt, threadId: null });
   const subtitle =
@@ -94,7 +114,11 @@ export function EmptyHero({ configured, onPickPrompt }: Props) {
         <FeatureCards
           features={features}
           layout="tiles"
-          onPick={(f) => setPicked(f)}
+          onPick={(f) => {
+            const t = templateById.get(f.id);
+            if (t) { onPickTemplate?.(t); return; }
+            setPicked(f);
+          }}
         />
       ) : null}
 

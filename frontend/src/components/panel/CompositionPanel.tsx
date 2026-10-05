@@ -31,6 +31,7 @@ import {
   type Composition,
   type CompositionStep,
 } from "@/lib/features/composition";
+import type { TaskTemplate } from "@/lib/client/taskTemplates";
 import type { AppMode } from "@/lib/store/mode";
 
 /** 대화에 나온 서식 인용 — form_find 가 목록으로 보여 준다. */
@@ -51,6 +52,12 @@ type Props = {
   /** 서식 인용 → 작성 모달(PageShell.handleUseAsForm). 미전달 시 목록 비노출 */
   onUseAsForm?: (articleKey: string, title: string) => void;
   onStop: () => void;
+  /** 직무(task) 템플릿(2026-10-06) — 저장된 연계. 없으면 섹션 비노출 */
+  templates: TaskTemplate[];
+  onSaveTemplate: (name: string) => Promise<void>;
+  onLoadTemplate: (t: TaskTemplate) => void;
+  onRenameTemplate: (t: TaskTemplate, name: string) => Promise<void>;
+  onDeleteTemplate: (t: TaskTemplate) => Promise<void>;
 };
 
 const BLANK: Composition = { steps: [], cursor: 0, mode: "stepwise", status: "draft" };
@@ -103,9 +110,19 @@ export function CompositionPanel({
   onRunNow,
   onUseAsForm,
   onStop,
+  templates,
+  onSaveTemplate,
+  onLoadTemplate,
+  onRenameTemplate,
+  onDeleteTemplate,
 }: Props) {
   const c = composition ?? BLANK;
   const [q, setQ] = useState("");
+  /** "직무로 저장" 인라인 이름 입력 — null 이면 닫힘 */
+  const [saveName, setSaveName] = useState<string | null>(null);
+  const [savingT, setSavingT] = useState(false);
+  /** 이름 변경 중인 템플릿 id */
+  const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [moreForms, setMoreForms] = useState(false);
   const [busyFile, setBusyFile] = useState(false);
@@ -284,6 +301,60 @@ export function CompositionPanel({
           </div>
         </div>
         <ul className="mt-1.5 min-h-0 flex-1 overflow-y-auto px-2.5 pb-2" data-testid="composition-grid">
+          {templates.length && !q.trim() ? (
+            <li className="mb-2" data-testid="composition-templates">
+              <div className="mb-1 flex items-center gap-1 text-[10.5px] font-semibold text-md-on-surface-variant">
+                <span className="material-symbols-outlined text-[13px] text-md-primary" aria-hidden>account_tree</span>
+                내 직무
+              </div>
+              <ul>
+                {templates.map((t) => (
+                  <li key={t.id} className="mb-1">
+                    {renaming?.id === t.id ? (
+                      <form
+                        className="flex items-center gap-1"
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          const n = renaming.name.trim();
+                          if (!n) return;
+                          void onRenameTemplate(t, n).finally(() => setRenaming(null));
+                        }}
+                      >
+                        <input autoFocus value={renaming.name}
+                               onChange={(e) => setRenaming({ id: t.id, name: e.target.value })}
+                               onKeyDown={(e) => { if (e.key === "Escape") setRenaming(null); }}
+                               maxLength={80}
+                               className="min-w-0 flex-1 rounded-[6px] border border-md-primary bg-md-surface px-2 py-1 text-[12px] outline-none" />
+                        <button type="submit" className="text-[11px] font-medium text-md-primary">저장</button>
+                      </form>
+                    ) : (
+                      <div className="group flex items-start gap-1.5 rounded-[8px] border border-md-outline-variant bg-md-surface-container-lowest p-2 hover:border-md-primary">
+                        <button type="button" data-template={t.id} onClick={() => onLoadTemplate(t)}
+                                title={t.steps.map((s) => byId.get(s.fn)?.title ?? s.fn).join(" → ")}
+                                className="min-w-0 flex-1 text-left">
+                          <span className="block truncate text-[12px] font-semibold leading-snug text-md-on-surface">{t.name}</span>
+                          <span className="block truncate text-[10.5px] leading-snug text-md-on-surface-variant">
+                            {t.steps.length}단계 · {t.steps.map((s) => byId.get(s.fn)?.title ?? s.fn).join(" → ")}
+                          </span>
+                        </button>
+                        <button type="button" title="이름 변경" aria-label="이름 변경"
+                                onClick={() => setRenaming({ id: t.id, name: t.name })}
+                                className="material-symbols-outlined text-[14px] text-md-on-surface-variant opacity-0 hover:text-md-primary group-hover:opacity-100 focus:opacity-100">
+                          edit
+                        </button>
+                        <button type="button" title="삭제" aria-label="삭제" data-template-delete={t.id}
+                                onClick={() => void onDeleteTemplate(t)}
+                                className="material-symbols-outlined text-[14px] text-md-on-surface-variant opacity-0 hover:text-md-error group-hover:opacity-100 focus:opacity-100">
+                          close
+                        </button>
+                      </div>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              <div className="mb-1 mt-2 text-[10.5px] font-semibold text-md-on-surface-variant">기능</div>
+            </li>
+          ) : null}
           {shown.length ? shown.map((f) => {
             const active = draft?.f.id === f.id && draft.idx === undefined;
             return (
@@ -470,11 +541,41 @@ export function CompositionPanel({
               <span className="text-[11px] font-semibold text-md-on-surface-variant">
                 연계 {Math.min(c.cursor, c.steps.length)}/{c.steps.length}
               </span>
+              {c.steps.length >= 1 && !running ? (
+                <button type="button" data-testid="composition-save-template"
+                        onClick={() => setSaveName((v) => (v === null ? "" : null))}
+                        className="ml-auto text-[11px] text-md-primary underline underline-offset-2">
+                  직무로 저장
+                </button>
+              ) : null}
               <button type="button" data-testid="composition-clear" onClick={() => onChange(null)}
-                      className="ml-auto text-[11px] text-md-on-surface-variant underline underline-offset-2 hover:text-md-error">
+                      className={(c.steps.length >= 1 && !running ? "" : "ml-auto ") + "text-[11px] text-md-on-surface-variant underline underline-offset-2 hover:text-md-error"}>
                 비우기
               </button>
             </div>
+            {saveName !== null ? (
+              <form
+                className="flex items-center gap-1 px-2.5 pt-1.5"
+                data-testid="composition-save-form"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const n = saveName.trim();
+                  if (!n || savingT) return;
+                  setSavingT(true);
+                  void onSaveTemplate(n).then(() => setSaveName(null)).finally(() => setSavingT(false));
+                }}
+              >
+                <input autoFocus value={saveName} onChange={(e) => setSaveName(e.target.value)}
+                       onKeyDown={(e) => { if (e.key === "Escape") setSaveName(null); }}
+                       placeholder="직무 이름 (예: 사건 검토 → 판례 → 의견서)" maxLength={80}
+                       data-testid="composition-save-name"
+                       className="min-w-0 flex-1 rounded-[6px] border border-md-primary bg-md-surface px-2 py-1 text-[12px] outline-none" />
+                <button type="submit" disabled={!saveName.trim() || savingT}
+                        className="rounded-pill bg-md-primary px-2.5 py-1 text-[11px] font-semibold text-md-on-primary disabled:opacity-40">
+                  저장
+                </button>
+              </form>
+            ) : null}
             <ol className="min-h-0 flex-1 overflow-y-auto px-2.5 py-1.5">
               {c.steps.map((st, i) => {
                 const f = byId.get(st.fn);

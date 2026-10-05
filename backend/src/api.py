@@ -65,6 +65,7 @@ from src.routes import (
     articles_router,
     beta_router,
     bookmarks_router,
+    task_templates_router,
     chat_router,
     feedback_router,
     files_router,
@@ -440,6 +441,7 @@ app.include_router(admin_reviews_router)  # /admin/review-queue · /admin/review
 app.include_router(admin_newsletters_router)  # /admin/newsletters — 뉴스레터 작성·발송·이력(2026-09-22)
 app.include_router(feedback_router)
 app.include_router(bookmarks_router)  # /bookmarks — 개인 근거 라이브러리
+app.include_router(task_templates_router)  # /task-templates — 직무 템플릿(2026-10-06)
 app.include_router(articles_router)
 app.include_router(law_graph_router)
 app.include_router(privacy_router)  # /me/consent · /me/data · /me/erase

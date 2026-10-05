@@ -44,7 +44,8 @@ docs/       OPERATIONS.md(운영 요약) · CHANGELOG.md(변경 요약)
 기능을 찾아 고르면 대화 내용으로 입력이 먼저 채워지고, **바로 실행**(한 턴) 하거나 **연계에 추가**해
 순서대로 돌린다. 2단계 이상이면 중간 단계는 숨은 턴으로 돌고 마지막 종합 1건만 남는다(단계별 /
 한번에). 빈 칸은 앞 단계·앞 대화 결과를 가리키도록 치환되므로 따로 적지 않아도 이어진다.
-기능 목록의 진실원은 `frontend/src/lib/features/catalog.ts`, 상세는 `frontend/docs/FEATURES.md`.
+연계에 이름을 붙이면 **직무(task)** 로 저장되어 첫 화면 "내 직무" 타일에서 한 번에 다시 돈다(값·파일은 저장하지
+않고 대화로 다시 채운다). 기능 목록의 진실원은 `frontend/src/lib/features/catalog.ts`, 상세는 `frontend/docs/FEATURES.md`.
 
 사용자에게 나가는 고지(면책·기능별 범위 고지·현행본 미보유 고지)는 프롬프트가 아니라 **코드가 결정적으로
 붙인다**(`backend/src/legal.py`). 기밀 모드는 보조 LLM 호출까지 원내 모델로만 돌리거나 건너뛴다(fail-closed).

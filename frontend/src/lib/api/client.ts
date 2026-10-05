@@ -67,7 +67,11 @@ export async function apiFetch<T>(
     err.body = body;
     throw err;
   }
-  return (await res.json()) as T;
+  // 204·빈 본문은 JSON 이 아니다 — `DELETE /task-templates` 가 204 를 돌려주자
+  // `res.json()` 이 던져 "삭제하지 못했습니다"로 보였다(2026-10-06 실측).
+  if (res.status === 204) return undefined as T;
+  const text = await res.text();
+  return (text ? JSON.parse(text) : undefined) as T;
 }
 
 /**

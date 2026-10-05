@@ -329,6 +329,31 @@ CREATE TABLE IF NOT EXISTS monitor_alert (
 CREATE INDEX IF NOT EXISTS idx_monitor_alert_thread
   ON monitor_alert(thread_id, detected_at DESC);
 
+-- 조합 단계 첨부 본문(암호화) — SQLite 스키마(`workflow_files_repo`)와 동일.
+-- 2026-10-06 까지 PG DDL 이 빠져 있었다(_PgRepoBase 는 init_schema 만 부른다).
+CREATE TABLE IF NOT EXISTS workflow_files (
+  id         TEXT PRIMARY KEY,
+  thread_id  TEXT NOT NULL,
+  name       TEXT NOT NULL,
+  chars      INTEGER NOT NULL DEFAULT 0,
+  text_enc   TEXT,
+  created_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_workflow_files_thread
+  ON workflow_files(thread_id);
+
+-- 직무(task) 템플릿 — 기능연계에 이름을 붙여 저장(2026-10-06). 값·파일 없음.
+CREATE TABLE IF NOT EXISTS task_templates (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL,
+  name       TEXT NOT NULL,
+  steps_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_task_templates_user
+  ON task_templates(user_id, updated_at DESC);
+
 CREATE TABLE IF NOT EXISTS contacts (
   id           TEXT PRIMARY KEY,
   user_id      TEXT NOT NULL,

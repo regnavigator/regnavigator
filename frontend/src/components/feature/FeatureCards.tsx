@@ -16,6 +16,7 @@ import { useMemo, useRef, useState } from "react";
 import type { Feature } from "@/lib/features/catalog";
 
 const CATEGORY_ICON: Record<string, string> = {
+  "내 직무": "account_tree",
   // 전문가 — 기능 단위
   "규제 경로 분해": "checklist",
   "서식 작성": "description",

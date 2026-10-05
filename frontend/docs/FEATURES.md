@@ -311,11 +311,24 @@ step3 → 숨은 턴 ┘
 
 `triggers:"attach"` 인 기능은 **파일이 없으면 실행 비활성**이다.
 
-### 장기 — function → composition → task
+### 직무(task) 템플릿 — 구현 (2026-10-06)
 
-조합의 저장 구조가 그대로 **직무(task)** 의 저장 구조다. task 는 "이 객체에 이름을
-붙여 따로 저장하는 것"으로 끝나야 하므로 단계 하나가 자족적이다(`fn` · `values` ·
-`files` · `confidential`).
+조합의 저장 구조가 그대로 **직무(task)** 의 저장 구조다. 연계 목록의 **"직무로 저장"** 으로
+이름을 붙이면 사용자 단위로 저장되고(`POST /task-templates`), 첫 화면 타일 맨 앞과 패널 타일
+위 "내 직무"에 선다. 누르면 새 스레드(또는 현재 스레드)에 `cursor 0 · draft` 로 복원되고, 대화가
+있으면 기존 자동 채움이 1단계 입력을 채운다. 이름 변경·삭제는 패널 "내 직무"에서.
+
+- **저장하는 것은 `fn`·`confidential` 뿐** — 값(사실관계·쟁점)은 사건마다 다르고 저장하면 다음
+  사건에 지난 사실관계가 섞인다(기밀 격리). 파일은 스레드 소속이라 못 옮긴다.
+- 복원 시 레지스트리에 없는 `fn` 은 버리고 토스트로 알린다(`fromTemplate`, 문서의 "끊어진 노드" 검증).
+- 서버 스레드는 첫 `POST /chat` 에서 생기므로, `PATCH /chat/{tid}/workflow` 는 **아직 없는
+  스레드를 호출자 소유로 만들어 받는다** — 첫 화면에서 직무를 고르는 흐름이 그 전에 저장한다.
+- 상한 사용자당 50개 · 이름 80자 · 8단계. 코드: `lib/client/taskTemplates.ts`, `composition.ts`
+  의 `toTemplateSteps/fromTemplate`, 백엔드 `persistence/task_templates_repo.py` · `routes/task_templates.py`.
+
+출처: `docs/Vibe_Coding_Agent_Master_Prompt.docx` 의 "템플릿 자산화"를 선별 적용(대조표는
+`/Users/…/plans` 가 아니라 `docs/CHANGELOG.md` 2026-10 항목 참조). 같은 문서의 분기 DAG·실패 시
+자동 우회·사전 시뮬레이션·Redis 는 채택하지 않았다.
 
 ## 12. 알려진 한계 / TODO
 

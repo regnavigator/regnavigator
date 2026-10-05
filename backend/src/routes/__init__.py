@@ -15,6 +15,7 @@ from src.routes.announcements import router as announcements_router
 from src.routes.articles import router as articles_router
 from src.routes.beta import router as beta_router
 from src.routes.bookmarks import router as bookmarks_router
+from src.routes.task_templates import router as task_templates_router
 from src.routes.chat import router as chat_router
 from src.routes.feedback import router as feedback_router
 from src.routes.files import router as files_router
@@ -38,6 +39,7 @@ __all__ = [
     "feedback_router",
     "files_router",
     "bookmarks_router",
+    "task_templates_router",
     "health_router",
     "law_graph_router",
     "monitor_router",

@@ -117,6 +117,42 @@ export async function suggestValues(
   }
 }
 
+/* ─────────────────── 직무(task) 템플릿 ↔ 조합 ─────────────────── */
+
+export type TemplateStep = { fn: string; confidential: boolean };
+
+/**
+ * 조합 → 템플릿 단계. **값·파일·done 을 버린다** — 값은 사건마다 다르고 저장하면
+ * 다음 사건에 지난 사실관계가 섞인다(기밀 격리). 파일은 스레드 소속이라 못 옮긴다.
+ */
+export function toTemplateSteps(c: Composition): TemplateStep[] {
+  return c.steps
+    .filter((st) => st.fn.trim())
+    .map((st) => ({ fn: st.fn, confidential: st.confidential }));
+}
+
+/**
+ * 템플릿 → 새 조합(cursor 0, draft). 레지스트리에 없는 기능 id 는 **버리고** 이름을
+ * 돌려준다 — 문서의 "끊어진 노드" 검증에 해당. 기능 목록의 진실원은 프런트라 여기서 한다.
+ */
+export function fromTemplate(
+  steps: TemplateStep[],
+  byId: Map<string, Feature>,
+): { composition: Composition | null; dropped: string[] } {
+  const dropped: string[] = [];
+  const out: CompositionStep[] = [];
+  for (const st of steps) {
+    const f = byId.get(st.fn);
+    if (!f) { dropped.push(st.fn); continue; }
+    out.push({ ...emptyStep(f), confidential: st.confidential });
+  }
+  if (!out.length) return { composition: null, dropped };
+  return {
+    composition: { steps: out, cursor: 0, mode: "stepwise", status: "draft" },
+    dropped,
+  };
+}
+
 /* ─────────────────── 단계 메시지 ─────────────────── */
 
 /**

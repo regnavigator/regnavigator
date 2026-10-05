@@ -420,8 +420,19 @@ async def set_thread_workflow(thread_id: str, request: Request):
 
     **스레드에 둔다.** 조합은 입력·파일·기밀까지 들어 있는 작업 계획이라, 클라이언트
     상태로만 들면 새로고침 한 번에 통째로 사라진다.
+
+    **아직 없는 스레드도 받는다**(2026-10-06). 첫 화면에서 직무를 고르면 프런트가 id 만
+    만든 스레드에 조합을 올리는데, 서버 스레드는 첫 `POST /chat` 에서야 생긴다 —
+    그 전엔 404 라 템플릿 복원이 조용히 유실됐다. `POST /chat` 과 같은 규칙으로 호출자
+    소유 스레드를 만든다.
     """
-    _owned_meta_or_404(thread_id, request)
+    from src.persistence.threads_repo import get_threads_repo
+
+    if _owned_meta_or_404(thread_id, request, allow_missing=True) is None:
+        user_id = getattr(request.state, "user_id", None)
+        if user_id is None:
+            raise HTTPException(status_code=404, detail="thread not found")
+        await asyncio.to_thread(get_threads_repo().ensure_thread, thread_id, user_id=str(user_id))
     body = await request.json()
 
     from src.workflow import WorkflowError, normalize
@@ -432,8 +443,6 @@ async def set_thread_workflow(thread_id: str, request: Request):
         wf = normalize(body)
     except WorkflowError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
-
-    from src.persistence.threads_repo import get_threads_repo
 
     await asyncio.to_thread(get_threads_repo().set_workflow, thread_id, wf)
     return {"ok": True, "thread_id": thread_id, "workflow": wf}

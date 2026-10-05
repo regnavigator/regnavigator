@@ -434,3 +434,18 @@ def test_join_prefill_leaves_full_json_alone():
 
 def test_join_prefill_plain_tail():
     assert _parse_values(join_prefill(_SUGGEST_PREFILL, ' {"a": "1"}}')) == {"a": "1"}
+
+
+def test_workflow_creates_missing_thread_for_caller(api):
+    """첫 화면에서 직무를 고르면 서버 스레드가 아직 없다 — 호출자 소유로 만들어 받는다(2026-10-06)."""
+    from src.persistence.threads_repo import get_threads_repo
+
+    tid = "t_wf_fresh_from_template"
+    assert get_threads_repo().get_meta(tid) is None
+    r = api.patch(f"/chat/{tid}/workflow", json={
+        "steps": [{"fn": "case_issues", "confidential": True}], "cursor": 0,
+        "mode": "stepwise", "status": "draft"})
+    assert r.status_code == 200, r.text
+    meta = get_threads_repo().get_meta(tid)
+    assert meta and meta.get("user_id") == AUTH_DEV_BYPASS_USER_ID
+    assert [s["fn"] for s in get_threads_repo().get_workflow(tid)["steps"]] == ["case_issues"]

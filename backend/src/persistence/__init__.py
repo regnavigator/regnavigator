@@ -70,6 +70,12 @@ from .report_runs_repo import (
     ReportRunsRepo,
     SqliteReportRunsRepo,
 )
+from .task_templates_repo import (
+    PostgresTaskTemplatesRepo,
+    SqliteTaskTemplatesRepo,
+    TaskTemplate,
+    TaskTemplatesRepo,
+)
 from .workflow_files_repo import (
     PostgresWorkflowFilesRepo,
     SqliteWorkflowFilesRepo,
@@ -201,6 +207,15 @@ def get_contacts_repo() -> ContactsRepo:
 
 
 @lru_cache(maxsize=1)
+def get_task_templates_repo() -> TaskTemplatesRepo:
+    if _backend() == "postgres":
+        return PostgresTaskTemplatesRepo(dsn=os.environ["REPORTS_PG_DSN"])
+    if _backend() == "sqlite":
+        return SqliteTaskTemplatesRepo(path=_sqlite_path())
+    raise ValueError(f"Unknown REPORTS_BACKEND: {_backend()!r}")
+
+
+@lru_cache(maxsize=1)
 def get_workflow_files_repo() -> WorkflowFilesRepo:
     if _backend() == "postgres":
         return PostgresWorkflowFilesRepo(dsn=os.environ["REPORTS_PG_DSN"])
@@ -220,6 +235,8 @@ def get_report_runs_repo() -> ReportRunsRepo:
 
 __all__ = [
     "WorkflowFile",
+    "TaskTemplate",
+    "get_task_templates_repo",
     "BlobStore",
     "ReportsRepo",
     "ReportMeta",

@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import { featuresFor } from "@/lib/features/catalog";
-import { emptyStep, stepBlanks, stepMessage } from "@/lib/features/composition";
+import {
+  emptyStep, fromTemplate, stepBlanks, stepMessage, toTemplateSteps, type Composition,
+} from "@/lib/features/composition";
 
 const pathway = featuresFor({ mode: "expert", hasTurns: true }).find((f) => f.id === "pathway")!;
 
@@ -33,5 +35,38 @@ describe("stepMessage", () => {
     expect(m).not.toContain("___(");
     expect(m).toContain("(앞 단계에서 정리한 대상)");
     expect(m.startsWith("앞 단계에서 정리한 내용과 근거를")).toBe(true);
+  });
+});
+
+describe("직무 템플릿 ↔ 조합", () => {
+  const all = featuresFor({ mode: "expert", hasTurns: true });
+  const byId = new Map(all.map((f) => [f.id, f]));
+
+  it("toTemplateSteps 는 값·파일·done 을 버린다", () => {
+    const c: Composition = {
+      steps: [{ fn: "case_issues", values: { facts: "비밀" }, files: [{ id: "wff_1", name: "a.pdf", chars: 3 }],
+                confidential: true, done: true },
+              { fn: "prec_issues", values: {}, files: [], confidential: false, done: true }],
+      cursor: 2, mode: "auto", status: "done",
+    };
+    expect(toTemplateSteps(c)).toEqual([
+      { fn: "case_issues", confidential: true }, { fn: "prec_issues", confidential: false }]);
+    expect(JSON.stringify(toTemplateSteps(c))).not.toContain("비밀");
+  });
+
+  it("fromTemplate 는 없는 id 를 걸러 cursor 0 / draft 로 복원한다", () => {
+    const r = fromTemplate(
+      [{ fn: "case_issues", confidential: true }, { fn: "gone_feature", confidential: false },
+       { fn: "prec_issues", confidential: false }], byId);
+    expect(r.dropped).toEqual(["gone_feature"]);
+    expect(r.composition?.steps.map((s) => s.fn)).toEqual(["case_issues", "prec_issues"]);
+    expect(r.composition?.steps[0]?.confidential).toBe(true);
+    expect(r.composition?.cursor).toBe(0);
+    expect(r.composition?.status).toBe("draft");
+    expect(r.composition?.steps.every((s) => Object.keys(s.values).length === 0 && s.files.length === 0)).toBe(true);
+  });
+
+  it("전부 없는 id 면 조합 없음", () => {
+    expect(fromTemplate([{ fn: "x", confidential: false }], byId).composition).toBeNull();
   });
 });

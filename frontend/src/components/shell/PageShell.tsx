@@ -71,12 +71,22 @@ import type { ChatState } from "@/lib/store/types";
 import { type Feature, featuresFor } from "@/lib/features/catalog";
 import { CompositionPanel, type FormCitation } from "@/components/panel/CompositionPanel";
 import {
+  createTaskTemplate,
+  deleteTaskTemplate,
+  listTaskTemplates,
+  renameTaskTemplate,
+  TASK_TEMPLATES_CHANGED_EVENT,
+  type TaskTemplate,
+} from "@/lib/client/taskTemplates";
+import {
   type Composition,
   type CompositionStep,
   saveComposition,
+  fromTemplate,
   stepMessage,
   suggestValues,
   synthesisMessage,
+  toTemplateSteps,
 } from "@/lib/features/composition";
 
 export function PageShell() {
@@ -156,6 +166,39 @@ function PageShellInner() {
 
   const composerThreadRef = useRef(false);
 
+  // ── 직무(task) 템플릿(2026-10-06) — 저장된 연계. 전문가 모드에서만 읽는다. ──
+  const [templates, setTemplates] = useState<TaskTemplate[]>([]);
+  const reloadTemplates = useCallback(() => {
+    if (!showPro) return;
+    listTaskTemplates().then(setTemplates).catch(() => { /* 목록 실패는 조용히 — 기능은 산다 */ });
+  }, [showPro]);
+  useEffect(() => {
+    reloadTemplates();
+    window.addEventListener(TASK_TEMPLATES_CHANGED_EVENT, reloadTemplates);
+    return () => window.removeEventListener(TASK_TEMPLATES_CHANGED_EVENT, reloadTemplates);
+  }, [reloadTemplates]);
+
+  /** 첫 화면에서 직무를 눌렀을 때 — 스레드가 생긴 뒤 적용할 템플릿 */
+  const pendingTemplateRef = useRef<TaskTemplate | null>(null);
+
+  const applyTemplate = useCallback(
+    async (t: TaskTemplate, tid: string) => {
+      const all = featuresFor({ mode, hasTurns: true });
+      const byId = new Map(all.map((f) => [f.id, f]));
+      const { composition: c, dropped } = fromTemplate(t.steps, byId);
+      if (dropped.length) {
+        toast.warning("일부 단계를 불러오지 못했습니다", {
+          description: `지금은 없는 기능: ${dropped.join(", ")}`,
+        });
+      }
+      if (!c) return;
+      setComposition(c);
+      await saveComposition(tid, c);
+      setComposer(true);
+    },
+    [mode, setComposer],
+  );
+
   /**
    * 조합 탭 열기 — **스레드를 먼저 만든다**.
    *
@@ -163,13 +206,19 @@ function PageShellInner() {
    * 실행할 수도 없다. 채팅은 첫 메시지에서 lazy 생성하지만 조합은 그 전에
    * 필요하다 — 열자마자 만든다.
    */
-  const openComposer = useCallback(async () => {
+  const openComposer = useCallback(async (template?: TaskTemplate) => {
     setComposer(true);
-    if (threadId || composerThreadRef.current) return;
+    if (threadId) {
+      if (template) void applyTemplate(template, threadId);
+      return;
+    }
+    if (composerThreadRef.current) return;
     composerThreadRef.current = true;
     try {
       const t = await createThread();
       adoptConfidential(t.id);
+      // 스레드가 URL 에 반영된 뒤(threadId 갱신) 아래 effect 가 적용한다.
+      pendingTemplateRef.current = template ?? null;
       router.replace(`/new?threadId=${t.id}`);
       window.dispatchEvent(new Event(THREAD_LIST_CHANGED_EVENT));
     } catch {
@@ -177,7 +226,38 @@ function PageShellInner() {
     } finally {
       composerThreadRef.current = false;
     }
-  }, [setComposer, threadId, router]);
+  }, [setComposer, threadId, router, applyTemplate]);
+
+  useEffect(() => {
+    const t = pendingTemplateRef.current;
+    if (!threadId || !t) return;
+    pendingTemplateRef.current = null;
+    void applyTemplate(t, threadId);
+  }, [threadId, applyTemplate]);
+
+  const saveTemplate = useCallback(async (name: string) => {
+    if (!composition?.steps.length) return;
+    try {
+      await createTaskTemplate(name, toTemplateSteps(composition));
+      toast.success(`"${name}" 직무로 저장했습니다`);
+      window.dispatchEvent(new Event(TASK_TEMPLATES_CHANGED_EVENT));
+    } catch (e) {
+      toast.error("직무를 저장하지 못했습니다", { description: (e as Error)?.message });
+    }
+  }, [composition]);
+  const renameTemplate = useCallback(async (t: TaskTemplate, name: string) => {
+    try {
+      await renameTaskTemplate(t.id, name);
+      window.dispatchEvent(new Event(TASK_TEMPLATES_CHANGED_EVENT));
+    } catch { toast.error("이름을 바꾸지 못했습니다"); }
+  }, []);
+  const deleteTemplate = useCallback(async (t: TaskTemplate) => {
+    try {
+      await deleteTaskTemplate(t.id);
+      toast.success(`"${t.name}" 삭제`);
+      window.dispatchEvent(new Event(TASK_TEMPLATES_CHANGED_EVENT));
+    } catch { toast.error("삭제하지 못했습니다"); }
+  }, []);
 
   /**
    * 세션이 시작되면(첫 턴) 기능연계 패널을 자동으로 열어 고정한다(2026-10-05 지침).
@@ -186,12 +266,15 @@ function PageShellInner() {
    */
   const autoOpenedRef = useRef<string | null>(null);
   const firstTurn = chat.state.turns.length > 0;
+  // 짜 놓은 연계(직무 복원 포함)가 있는 스레드도 연다 — 아니면 새로고침 뒤 연계가
+  // 서버엔 있는데 화면엔 없다(2026-10-06 실측).
+  const hasDraft = (composition?.steps.length ?? 0) > 0;
   useEffect(() => {
-    if (!threadId || !firstTurn || !showPro || mode === "monitor") return;
+    if (!threadId || !(firstTurn || hasDraft) || !showPro || mode === "monitor") return;
     if (autoOpenedRef.current === threadId) return;
     autoOpenedRef.current = threadId;
     setComposer(true);
-  }, [threadId, firstTurn, showPro, mode, setComposer]);
+  }, [threadId, firstTurn, hasDraft, showPro, mode, setComposer]);
 
   /** 패널의 "바로 실행" — 기능 하나를 보이는 턴으로 지금 보낸다. */
   const runFeatureNow = useCallback(
@@ -537,6 +620,11 @@ function PageShellInner() {
       onRunNow={runFeatureNow}
       onUseAsForm={showPro ? handleUseAsForm : undefined}
       onStop={() => { stopRef.current = true; chat.stop(); }}
+      templates={templates}
+      onSaveTemplate={saveTemplate}
+      onLoadTemplate={(t) => void openComposer(t)}
+      onRenameTemplate={renameTemplate}
+      onDeleteTemplate={deleteTemplate}
     />
   );
 
@@ -690,6 +778,8 @@ function PageShellInner() {
               onToggle: () => setRpOpen(!rpOpen),
             }}
             forceProcess={composing}
+            templates={showPro ? templates : undefined}
+            onPickTemplate={(t) => void openComposer(t)}
           />
         </div>
 
@@ -842,6 +932,8 @@ function PageShellInner() {
                 onToggle: toggleRight,
               }}
               forceProcess={composing}
+              templates={showPro ? templates : undefined}
+              onPickTemplate={(t) => void openComposer(t)}
             />
           </Panel>
 
@@ -943,6 +1035,9 @@ type ChatColumnProps = {
   forceProcess?: boolean;
   /** 조합 패널 열기(2026-10-02) — 전문가 모드에서만 전달된다. */
   onOpenComposer?: () => void;
+  /** 첫 화면 "내 직무" 타일(2026-10-06) — 전문가 모드에서만 채워진다 */
+  templates?: TaskTemplate[];
+  onPickTemplate?: (t: TaskTemplate) => void;
 };
 
 /**
@@ -1008,6 +1103,8 @@ function ChatColumn({
   rightPanelToggle,
   onOpenComposer,
   forceProcess,
+  templates,
+  onPickTemplate,
 }: ChatColumnProps) {
   const { mode } = useMode();
   const router = useRouter();
@@ -1431,6 +1528,8 @@ function ChatColumn({
           <EmptyHero
             configured={configured}
             onPickPrompt={(p, h) => { setDraftHint(h ?? null); setDraftPrefill(p); }}
+            templates={templates}
+            onPickTemplate={onPickTemplate}
           />
           {/* vt-chat-input: 첫 메시지 전송 시 스레드 하단 입력창과 shared-element
               morph — 중앙→하단으로 스무스 슬라이딩(View Transitions). */}

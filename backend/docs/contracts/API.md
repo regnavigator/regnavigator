@@ -679,6 +679,20 @@ GET /law-graph?keys=006364_000100,001275_000700&depth=1&rels=CITES&per_node_cap=
               "report_writer": {"status":"ok","critical":false,"latency_ms":9} } } // 다운→보고서만 영향
 ```
 
+### 13-b2) `/task-templates` — 직무(task) 템플릿 *(2026-10-06 · 인증 필요 · 쿼터 밖)*
+
+기능연계를 이름 붙여 저장한 것. 사용자 스코프. 값·파일은 저장하지 않는다(`fn`·`confidential` 만).
+
+| 메서드 | 경로 | 본문 / 응답 |
+|---|---|---|
+| POST | `/task-templates` | `{"name", "steps":[{"fn","confidential"?,…}]}` → 201 `{id,name,steps,created_at,updated_at}`. 빈 steps·빈 이름·81자·9단계·사용자당 51개째 → 422 |
+| GET | `/task-templates` | `{"items":[…]}` (updated_at 역순, ≤50) |
+| PATCH | `/task-templates/{id}` | `{"name"}` → `{ok,name}` · 타인/미존재 404 |
+| DELETE | `/task-templates/{id}` | 204 · 타인/미존재 404 |
+
+`PATCH /chat/{tid}/workflow` 는 같은 날부터 **아직 없는 스레드를 호출자 소유로 만들어 받는다**
+(첫 화면에서 직무를 골라 복원할 때 서버 스레드가 아직 없다).
+
 ### 13-c) `GET /legal` — 법적 고지 정본 *(신규 · 인증 X · 상시 노출용)*
 
 면책 문구를 **LLM 이 생성하지 않는다**(표현 흔들림·누락 방지) — 정본은 `src/legal.py`,
