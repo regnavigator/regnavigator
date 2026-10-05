@@ -547,7 +547,7 @@ function PageShellInner() {
   }, [threadsOpen, showRightPanel, rightMode]);
 
   // ── 좁은 화면(모바일) 레이아웃 — 3-pane 대신 단일 컬럼 + 드로어/오버레이 ──
-  // resizable PanelGroup 은 375px 폭에서 성립하지 않아(사이드바 16% ≈ 60px)
+  // resizable PanelGroup 은 1024px 미만에서 성립하지 않아(사이드바 16% ≈ 60~160px)
   // 사이드바는 좌측 드로어, 우측 패널은 전체 화면 오버레이로 전환. 임시완화 —
   // 전용 모바일 UX(스와이프 등)는 별도 스프린트.
   if (isNarrow) {
