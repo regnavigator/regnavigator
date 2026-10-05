@@ -30,7 +30,7 @@ function getTimeGreeting(): string {
 
 type Props = {
   configured: boolean;
-  onPickPrompt?: (text: string) => void;
+  onPickPrompt?: (text: string, hint?: { docKinds?: string[] }) => void;
 };
 
 export function EmptyHero({ configured, onPickPrompt }: Props) {

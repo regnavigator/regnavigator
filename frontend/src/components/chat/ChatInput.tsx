@@ -9,7 +9,7 @@
  * - 파일 첨부(v1, 2026-08-05): /files/extract 업로드 → 칩 → 전송 시 attachments.
  */
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useMode } from "@/components/providers/ModeProvider";
 import {
   CONFIDENTIAL_CHANGED_EVENT,
@@ -22,7 +22,6 @@ import {
 import { getMyPrefs, setReportEmailOptIn } from "@/lib/client/prefs";
 import { extractFile, type ExtractedAttachment } from "@/lib/client/files";
 import { toast } from "sonner";
-import { FeaturePicker } from "@/components/feature/FeaturePicker";
 import { DisclaimerHint } from "@/components/legal/DisclaimerHint";
 import {
   Popover,
@@ -66,6 +65,8 @@ type Props = {
   onManualReport?: (purpose?: string | null) => void;
   /** EmptyHero 칩 등에서 textarea에 prefill될 텍스트. 한 번 채운 뒤 호스트가 null로 cleared 해야 함. */
   prefill?: string | null;
+  /** 프리필과 함께 오는 기능 힌트(검색 종별) — 그 전송 한 번에만 실린다(2026-10-05). */
+  prefillHint?: { docKinds?: string[] } | null;
   /** prefill 한 번 적용 후 호스트에 알림 (한 번만 채우게) */
   onPrefillConsumed?: () => void;
   /** 조합 패널 열기(2026-10-02) — 전문가 전용. 미전달 시 버튼 숨김 */
@@ -95,13 +96,14 @@ export function ChatInput({
   threadId = null,
   isMonitor = false,
   prefill,
+  prefillHint,
   onPrefillConsumed,
   onOpenComposer,
   onSend,
   onStop,
 }: Props) {
   // 보고서 기능 가용성(2026-09-07) — 일시 중단이면 버튼 비활성 + 배너, writer 다운이면 경고
-  const { mode, showPro } = useMode();   // 일반 상담 모드에서는 전문가 기능을 감춘다
+  const { showPro } = useMode();   // 일반 상담 모드에서는 전문가 기능을 감춘다
   const [confidential, setConfidentialState] = useState(false);
   // localStorage 는 SSR 에서 못 읽으므로 mount 뒤 채운다(hydration 불일치 방지).
   useEffect(() => {
@@ -167,8 +169,12 @@ export function ChatInput({
   // P6.1.3 — EmptyHero 예시 칩·문서 패널 유도 → textarea prefill.
   // 채운 뒤 포커스 + 커서 끝(2026-08-27) — 문서 패널의 "채팅으로 알려주기"는
   // 문장을 이어서 치는 흐름이라, 포커스가 안 오면 프리필된 걸 알아채지 못한다.
+  // 기능 힌트(검색 종별) — 프리필과 함께 와서 **그 전송 한 번**에만 실린다.
+  // 종전엔 입력창 피커만 힌트를 넘기고 첫 화면 타일은 버렸다(2026-10-05 정정).
+  const pendingHintRef = useRef<{ docKinds?: string[] } | null>(null);
   useEffect(() => {
     if (prefill && prefill.length > 0) {
+      pendingHintRef.current = prefillHint ?? null;
       setValue(prefill);
       onPrefillConsumed?.();
       requestAnimationFrame(() => {
@@ -182,21 +188,6 @@ export function ChatInput({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefill]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  /** 기능 피커가 조립한 템플릿을 입력창에 넣는다 — 자동 전송하지 않는다. */
-  // 기능 힌트(검색 종별) — 프리필과 함께 와서 **그 전송 한 번**에만 실린다.
-  const pendingHintRef = useRef<{ docKinds?: string[] } | null>(null);
-  const applyPrefill = useCallback((text: string, hint?: { docKinds?: string[] }) => {
-    pendingHintRef.current = hint ?? null;
-    setValue(text);
-    requestAnimationFrame(() => {
-      const el = textareaRef.current;
-      if (el) {
-        el.focus();
-        el.setSelectionRange(el.value.length, el.value.length);
-      }
-    });
-  }, []);
 
   // 자동 grow — 매 입력마다 height 재계산 (P4.1)
   useLayoutEffect(() => {
@@ -656,31 +647,23 @@ export function ChatInput({
                 관찰 목록
               </button>
             ) : null}
-            {/* 기능 피커 — **일반 상담에는 두지 않는다**(2026-10-02).
-                일반인 모드는 "그냥 물어보면 답한다"가 전부여야 한다. 기능을
-                고르게 하는 순간 무엇을 골라야 할지부터 배워야 하는 도구가 된다.
-                기능과 조합은 전문가 모드의 차별점으로 남긴다. */}
-            {mode !== "public" ? (
-              <FeaturePicker
-                ctx={{ mode, hasTurns: !!onManualReport }}
-                disabled={running || overLimit}
-                onPrefill={applyPrefill}
-                threadId={threadId}
-              />
-            ) : null}
-            {/* 조합(2026-10-02) — 전문가 전용. 짜는 화면은 우측 패널에 상주한다. */}
+            {/* 기능연계(2026-10-05) — 전문가 전용. 기능 하나를 바로 실행하거나 여러
+                기능을 연계하는 패널을 우측에 연다. 종전의 입력창 팝오버 피커와 조합
+                버튼을 이 하나로 합쳤다. **일반 상담에는 두지 않는다** — 일반인 모드는
+                "그냥 물어보면 답한다"가 전부여야 한다. */}
             {onOpenComposer ? (
               <button
                 type="button"
                 data-testid="composer-open"
                 onClick={onOpenComposer}
                 disabled={running || overLimit}
+                title="기능을 골라 바로 실행하거나 여러 기능을 연계합니다"
                 className="inline-flex h-9 items-center gap-1.5 rounded-full px-3.5 text-[13px] font-medium text-md-on-surface-variant transition-colors hover:bg-md-surface-container-low hover:text-md-on-surface disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <span className="material-symbols-outlined text-[16px]" aria-hidden>
-                  lab_profile
+                  account_tree
                 </span>
-                조합
+                기능연계
               </button>
             ) : null}
             {/* 의견서 초안 — 지금까지의 대화와 그 인용으로 서면 골격을 만든다

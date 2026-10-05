@@ -425,7 +425,7 @@ export function RightPanel({
     const showComposer = tab === "composer" || !anyContent;
     return (
       <aside
-        aria-label="Composition"
+        aria-label="기능연계"
         className="flex h-full w-full min-w-0 flex-col bg-md-surface-container-lowest"
       >
         <div className="flex items-center gap-1 border-b border-md-outline-variant px-2 py-1.5">
@@ -441,7 +441,7 @@ export function RightPanel({
                 : "text-md-on-surface-variant hover:text-md-primary")
             }
           >
-            조합
+            기능연계
           </button>
           <button
             type="button"
@@ -461,7 +461,7 @@ export function RightPanel({
           <button
             type="button"
             onClick={() => setComposer(false)}
-            title="조합 탭 닫기"
+            title="기능연계 패널 닫기"
             className="ml-auto text-[11px] text-md-on-surface-variant hover:text-md-primary"
           >
             <span className="material-symbols-outlined text-[15px]" aria-hidden>

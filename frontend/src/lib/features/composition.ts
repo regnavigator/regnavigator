@@ -50,6 +50,17 @@ export function stepReady(f: Feature | undefined, st: CompositionStep): boolean 
   return true;
 }
 
+/**
+ * 채워야 할 빈 칸이 남았는가 (2026-10-05). 폼의 `build` 는 빈 값을 `___(힌트)` 로
+ * 남기므로 그 표식이 곧 "아직 못 보낼 문장"이다 — 템플릿 규칙과 같은 진실원을 쓴다.
+ */
+export function stepBlanks(f: Feature, st: CompositionStep): boolean {
+  if (!f.form) return false;
+  const cleaned: Record<string, string> = {};
+  for (const [k, v] of Object.entries(st.values)) cleaned[k] = (v ?? "").trim();
+  return f.form.build(cleaned).includes("___(");
+}
+
 /** 파일을 올려야만 의미가 있는 기능인가 — `triggers:"attach"` 가 그 표식이다. */
 export function needsFiles(f: Feature): boolean {
   return f.triggers === "attach";
@@ -127,7 +138,11 @@ export function stepMessage(
   if (f.form) {
     const cleaned: Record<string, string> = {};
     for (const [k, v] of Object.entries(st.values)) cleaned[k] = (v ?? "").trim();
-    return lead + f.form.build(cleaned);
+    const body = f.form.build(cleaned);
+    // 2단계부터 남은 빈 칸은 앞 단계 결과를 가리키게 바꾼다(2026-10-05 실측 정정).
+    // `___(대상)` 그대로 보내면 모델이 "란이 비어 있습니다"로 멈춘다 — 입력 제안이
+    // 비었을 때(앞 단계가 검색 실패 등으로 빈약할 때) 실제로 그랬다.
+    return lead + (index > 0 ? body.replace(/___\(([^)]*)\)/g, "(앞 단계에서 정리한 $1)") : body);
   }
   return lead + f.title;
 }

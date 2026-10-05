@@ -57,32 +57,25 @@ import { useUsage } from "@/lib/store/useUsage";
 import { useIsNarrow } from "@/lib/useIsNarrow";
 import { useMode } from "@/components/providers/ModeProvider";
 import {
-  adoptConfidential,
-  autoEnableConfidential,
   OPEN_BRIEF_EVENT,
   OPEN_WATCH_EVENT,
+  adoptConfidential,
+  autoEnableConfidential,
   setConfidential,
 } from "@/lib/store/mode";
 import { MonitorWorkDialog } from "@/components/monitor/MonitorWorkDialog";
 import { WATCH_CHANGED_EVENT } from "@/components/monitor/WatchPanel";
 import { addWatch, listWatch, removeWatch } from "@/lib/client/monitorThreads";
 import type { ChatState } from "@/lib/store/types";
-import { featuresFor } from "@/lib/features/catalog";
+import { type Feature, featuresFor } from "@/lib/features/catalog";
 import { CompositionPanel } from "@/components/panel/CompositionPanel";
-
-/**
- * 기능 조합 진입을 숨긴다(2026-10-05 결정). "기능과 조합이 중복된다 — 기능을 그냥
- * 반복해서 쓰면 된다." 조합이 더하는 것(숨은 턴·종합 1건·단계별 파일·자동 실행)은
- * 별도 개념으로 배울 가치가 없다는 판단. 코드·백엔드 `/workflow` 는 그대로 두고
- * 진입점만 끈다 — 직무(task) 템플릿이 다시 필요해지면 이 플래그로 되살린다.
- */
-const COMPOSER_ENABLED = false;
 import {
+  type Composition,
+  type CompositionStep,
   saveComposition,
   stepMessage,
   suggestValues,
   synthesisMessage,
-  type Composition,
 } from "@/lib/features/composition";
 
 export function PageShell() {
@@ -183,6 +176,38 @@ function PageShellInner() {
     }
   }, [setComposer, setRpOpen, threadId, router]);
 
+  /**
+   * 세션이 시작되면(첫 턴) 기능연계 패널을 자동으로 열어 고정한다(2026-10-05 지침).
+   * 스레드당 한 번만 — 사용자가 닫으면 그 스레드에서는 다시 열지 않는다. 입력창의
+   * "기능연계" 버튼으로는 언제든 다시 연다.
+   */
+  const autoOpenedRef = useRef<string | null>(null);
+  const firstTurn = chat.state.turns.length > 0;
+  useEffect(() => {
+    if (!threadId || !firstTurn || !showPro || mode === "monitor") return;
+    if (autoOpenedRef.current === threadId) return;
+    autoOpenedRef.current = threadId;
+    setComposer(true);
+    setRpOpen(true);
+  }, [threadId, firstTurn, showPro, mode, setComposer, setRpOpen]);
+
+  /** 패널의 "바로 실행" — 기능 하나를 보이는 턴으로 지금 보낸다. */
+  const runFeatureNow = useCallback(
+    (f: Feature, st: CompositionStep) => {
+      if (f.triggers === "confidential" && autoEnableConfidential(mode, threadId)) {
+        toast.info("기밀 모드를 켰습니다 — 이 대화는 원내 모델로만 처리됩니다.", {
+          duration: 7000,
+        });
+      }
+      void chat.send(stepMessage(f, st, 0), {
+        confidential: st.confidential,
+        workflowFileIds: st.files.map((x) => x.id),
+        docKinds: f.docKinds,
+      });
+    },
+    [chat, mode, threadId],
+  );
+
   const persistComposition = useCallback(
     async (c: Composition | null) => {
       setComposition(c);
@@ -215,6 +240,16 @@ function PageShellInner() {
 
       const all = featuresFor({ mode, hasTurns: true });
       const byId = new Map(all.map((f) => [f.id, f]));
+
+      // 한 단계뿐이면 연계가 아니다 — 숨은 턴 + 종합 대신 보통 질문처럼 보낸다
+      // (2026-10-05). 숨겼다가 종합하면 같은 답을 두 번 만드는 셈이다.
+      if (c.steps.length === 1) {
+        const f = byId.get(c.steps[0]!.fn);
+        if (!f) return;
+        runFeatureNow(f, c.steps[0]!);
+        await persistComposition(null);
+        return;
+      }
 
       setComposing(true);
       stopRef.current = false;
@@ -299,7 +334,8 @@ function PageShellInner() {
         setComposing(false);
       }
     },
-    [threadId, composition, composing, mode, chat, waitIdle, persistComposition],
+    [threadId, composition, composing, mode, chat, waitIdle, persistComposition,
+     runFeatureNow],
   );
 
 
@@ -567,9 +603,7 @@ function PageShellInner() {
             configured={configured}
             onUseAsForm={showPro ? handleUseAsForm : undefined}
             onOpenComposer={
-              COMPOSER_ENABLED && showPro && mode !== "monitor"
-                ? () => void openComposer()
-                : undefined
+              showPro && mode !== "monitor" ? () => void openComposer() : undefined
             }
             shellError={shellError}
             clearShellError={() => setShellError(null)}
@@ -633,6 +667,7 @@ function PageShellInner() {
                     running={composing}
                     onChange={(c) => void persistComposition(c)}
                     onRun={(m) => void runComposition(m)}
+                    onRunNow={runFeatureNow}
                     onStop={() => { stopRef.current = true; chat.stop(); }}
                   />
                 }
@@ -727,9 +762,7 @@ function PageShellInner() {
               threadsOpen={threadsOpen}
               onOpenThreads={openThreads}
               onOpenComposer={
-              COMPOSER_ENABLED && showPro && mode !== "monitor"
-                ? () => void openComposer()
-                : undefined
+              showPro && mode !== "monitor" ? () => void openComposer() : undefined
             }
               rightPanelToggle={{
                 open: showRightPanel,
@@ -771,6 +804,7 @@ function PageShellInner() {
                     running={composing}
                     onChange={(c) => void persistComposition(c)}
                     onRun={(m) => void runComposition(m)}
+                    onRunNow={runFeatureNow}
                     onStop={() => { stopRef.current = true; chat.stop(); }}
                   />
                 }
@@ -869,6 +903,7 @@ function ChatColumn({
   const pathname = usePathname();
   const [threadId, setThreadIdQuery] = useQueryState("threadId");
   const [draftPrefill, setDraftPrefill] = useState<string | null>(null);
+  const [draftHint, setDraftHint] = useState<{ docKinds?: string[] } | null>(null);
 
   /**
    * 화면에 그릴 턴 — 조합의 중간 단계는 뺀다 (2026-10-02).
@@ -1282,7 +1317,7 @@ function ChatColumn({
         <div className="flex flex-1 flex-col items-center justify-center overflow-y-auto px-6 py-6">
           <EmptyHero
             configured={configured}
-            onPickPrompt={(p) => setDraftPrefill(p)}
+            onPickPrompt={(p, h) => { setDraftHint(h ?? null); setDraftPrefill(p); }}
           />
           {/* vt-chat-input: 첫 메시지 전송 시 스레드 하단 입력창과 shared-element
               morph — 중앙→하단으로 스무스 슬라이딩(View Transitions). */}
@@ -1297,7 +1332,8 @@ function ChatColumn({
               overLimitNotice={overLimitNotice}
               quotaWarning={quotaWarning}
               prefill={draftPrefill}
-              onPrefillConsumed={() => setDraftPrefill(null)}
+              prefillHint={draftHint}
+              onPrefillConsumed={() => { setDraftPrefill(null); setDraftHint(null); }}
               onOpenComposer={onOpenComposer}
               onSend={(t, atts, hint, dk) =>
                 withViewTransitionAsync(() => void handleSend(t, atts, hint, dk))
@@ -1331,7 +1367,7 @@ function ChatColumn({
                   <TurnView
                     key={t.id}
                     turn={t}
-                    onPickNextStep={(p) => setDraftPrefill(p)}
+                    onPickNextStep={(p) => { setDraftHint(null); setDraftPrefill(p); }}
                     onTriggerReport={(p, purpose) => {
                       // overLimit이면 dispatch 차단(soft cap과 동일 정책).
                       if (overLimit) return;
@@ -1435,7 +1471,8 @@ function ChatColumn({
               overLimitNotice={overLimitNotice}
               quotaWarning={quotaWarning}
               prefill={draftPrefill}
-              onPrefillConsumed={() => setDraftPrefill(null)}
+              prefillHint={draftHint}
+              onPrefillConsumed={() => { setDraftPrefill(null); setDraftHint(null); }}
               onOpenComposer={onOpenComposer}
               onSend={(t, atts, hint, dk) => void handleSend(t, atts, hint, dk)}
               onStop={stop}
