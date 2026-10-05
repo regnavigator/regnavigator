@@ -763,7 +763,7 @@ function PageShellInner() {
           // 신호 등)이면 그 시각이 그대로 노출됨. **autoSaveId를 closed 케이스에도
           // 동일 모드값으로 고정** — 닫힌 상태에선 어차피 우측 Panel을 mount 안 하므로
           // 폭 persist에 무관. group은 한 ID로 유지 → mode 토글 없이는 remount X.
-          autoSaveId={`root-${rightMode === "artifact" ? "artifact-v2" : "side-v3"}${showComposerPanel ? "-f" : ""}`}
+          autoSaveId={`root-${rightMode === "artifact" ? "artifact-v2" : "side-v4"}${showComposerPanel ? "-f" : ""}`}
           className="h-full w-full"
         >
           {(threadsOpen || threadsClosing) && (
@@ -805,7 +805,7 @@ function PageShellInner() {
                 ? showComposerPanel ? 66 : 84
                 : rightMode === "artifact"
                   ? showComposerPanel ? 38 : 56 // artifact: 우측 44%
-                  : showComposerPanel ? 30 : 64 // side(citation·reports·deep·split): 우측 36%
+                  : showComposerPanel ? 44 : 62 // side(citation·reports·deep·split): 우측 22% (2026-10-06, 종전 36%의 60%)
             }
             minSize={30}
           >
@@ -844,8 +844,8 @@ function PageShellInner() {
               <Panel
                 id="right"
                 order={3}
-                defaultSize={rightMode === "artifact" ? 44 : 36}
-                minSize={20}
+                defaultSize={rightMode === "artifact" ? 44 : 22}
+                minSize={16}
                 maxSize={55}
                 className={
                   "border-l border-md-outline-variant transition-colors duration-[var(--motion-fast)] " +
