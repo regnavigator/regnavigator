@@ -492,6 +492,16 @@ function PageShellInner() {
     [chat, mode, setDocumentId, threadId],
   );
 
+  // 옛 autoSaveId 가 남긴 레이아웃 청소 — 남아 있으면 라이브러리가 다시 읽지는 않지만
+  // 혼란의 근원이라 지운다(2026-10-06).
+  useEffect(() => {
+    try {
+      for (const k of Object.keys(localStorage)) {
+        if (k.startsWith("react-resizable-panels:root-")) localStorage.removeItem(k);
+      }
+    } catch { /* private mode 등 */ }
+  }, []);
+
   // 표시 여부 = mode가 있고 사용자가 닫지 않았을 때
   const showRightPanel = Boolean(rightMode) && rpOpen;
   // 기능연계 패널(2026-10-05) — 근거 패널과 독립. 전문가 전용.
@@ -759,16 +769,12 @@ function PageShellInner() {
       <div className="flex-1 overflow-hidden">
         <PanelGroup
           direction="horizontal"
-          // v2 — side 모드 default 폭 28%로 변경. autoSaveId 그대로 두면 localStorage에
-          // 박힌 직전 20% 드래그 폭이 우선 적용돼 새 기본값 무효화. 한 번 reset 후 사용자가
-          // 다시 드래그하면 그 값으로 persist.
-          // 사용자 회신("답변 생성할때 오른쪽사이드 열렸다닫혔다 왔다갔다"): autoSaveId가
-          // closed↔side-v3↔artifact-v2 사이를 토글하면 PanelGroup 자체가 remount되어
-          // 깜빡임. 답변 도중 useRightPanelMode가 미세하게 null↔"side" 변동(폴링·deep
-          // 신호 등)이면 그 시각이 그대로 노출됨. **autoSaveId를 closed 케이스에도
-          // 동일 모드값으로 고정** — 닫힌 상태에선 어차피 우측 Panel을 mount 안 하므로
-          // 폭 persist에 무관. group은 한 ID로 유지 → mode 토글 없이는 remount X.
-          autoSaveId={`root-${rightMode === "artifact" ? "artifact-v2" : "side-v5"}${showComposerPanel ? "-f" : ""}`}
+          // 폭은 **저장하지 않는다**(2026-10-06). autoSaveId 로 localStorage 에 남긴 드래그
+          // 폭이 새 기본값을 네 번(v2→v5) 덮었고, 마지막엔 Fast Refresh 가 옛 레이아웃을
+          // 새 키에 다시 써서 "2:1 로 고쳤는데 화면은 30:36" 이 됐다. 로드마다 기본 비율,
+          // 드래그는 그 세션 안에서만 유지한다. 단일 group id 유지(모드 토글 시 remount
+          // 깜빡임 방지 — 2026 사용자 회신)는 key 로 대신한다.
+          key="root"
           className="h-full w-full"
         >
           {(threadsOpen || threadsClosing) && (
