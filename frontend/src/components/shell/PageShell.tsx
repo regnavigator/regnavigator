@@ -358,6 +358,10 @@ function PageShellInner() {
           // 내용을 읽어야 하므로, 상용으로 보내면 격리가 여기서 무너진다.
           const anyConf = steps.some((x) => x.confidential);
           await chat.send(synthesisMessage(titles), { confidential: anyConf });
+          // 끝난 연계는 **비운다**(2026-10-06 지적: "사용하고 나면 없어져야"). 남겨 두면
+          // 다음 연계를 짤 때 섞이고, 종합이 이미 대화에 있으니 다시 볼 이유도 없다.
+          // 단계별 모드로 중간에 멈춘 것·오류로 멈춘 것만 남는다(이어 돌려야 하므로).
+          await persistComposition(null);
         }
       } finally {
         setComposing(false);

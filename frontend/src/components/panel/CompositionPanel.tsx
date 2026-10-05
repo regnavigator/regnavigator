@@ -504,7 +504,7 @@ export function CompositionPanel({
                         className="w-full rounded-pill border border-md-error px-3 py-1.5 text-[12px] font-semibold text-md-error">
                   중단
                 </button>
-              ) : c.status === "done" ? (
+              ) : c.status === "done" ? ( // 구버전 저장분 — 지금은 끝나면 비운다
                 <button type="button" data-testid="composition-run-auto" disabled={!canRun} onClick={() => onRun("auto")}
                         className="w-full rounded-pill border border-md-primary px-3 py-1.5 text-[12px] font-semibold text-md-primary disabled:opacity-40">
                   다시 실행
