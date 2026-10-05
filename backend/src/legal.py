@@ -73,6 +73,55 @@ def append_feature_caveat(body: str, doc_kinds) -> str:
     return body.rstrip() + "\n\n" + FEATURE_CAVEAT_MARK + " ".join(notes)
 
 
+#: "현행본 미보유" 고지 (2026-10-05, 감사 L4·3-3).
+#: 코퍼스는 법령당 1버전이고, 88개 법령(의료법·약사법 포함)은 그 1개가 **시행예정본**이다.
+#: 목록을 하드코딩하면 ETL 이 바뀔 때 조용히 틀어지므로, 턴의 인용 상태로 판정한다 —
+#: 어떤 법령의 인용이 **전부** 시행예정(amended_pending)이면 "현행본은 못 봤다"고 알린다.
+#: 같은 법령의 현행 조문이 하나라도 인용됐으면 붙이지 않는다(개정 예정 동반 표시는 정상).
+PENDING_ONLY_MARK = "※ 현행본 고지: "
+_LAW_NAME_RE = __import__("re").compile(r"^(.*?)(?:\s+제\d+조|\s+별표|\s+별지|\s*\[)")
+
+
+def _law_name(c: dict) -> str:
+    t = str(c.get("law_title") or c.get("title") or "").strip()
+    m = _LAW_NAME_RE.match(t)
+    return (m.group(1) if m else t).strip()
+
+
+def pending_only_laws(citations) -> list[str]:
+    """인용이 시행예정본뿐인 법령명 목록(등장 순)."""
+    active: set[str] = set()
+    pending: list[str] = []
+    for c in citations or []:
+        if not isinstance(c, dict) or c.get("source_kind") != "doc":
+            continue
+        name = _law_name(c)
+        if not name:
+            continue
+        is_pending = (c.get("status") == "amended_pending"
+                      or c.get("effective_status") == "미시행"
+                      or c.get("enforced") is False)
+        if is_pending:
+            if name not in pending:
+                pending.append(name)
+        else:
+            active.add(name)
+    return [n for n in pending if n not in active]
+
+
+def append_pending_only_notice(body: str, citations) -> str:
+    """시행예정본만 인용된 법령이 있으면 본문 끝에 고지를 붙인다(멱등)."""
+    if not body or PENDING_ONLY_MARK in body:
+        return body
+    laws = pending_only_laws(citations)
+    if not laws:
+        return body
+    return (body.rstrip() + "\n\n" + PENDING_ONLY_MARK
+            + "다음 법령은 **시행 예정본**만 인용되었고 현재 시행 중인 조문은 이 답변에 "
+            + "반영되지 않았습니다 — " + ", ".join(laws) + ". "
+            + "현행 조문은 국가법령정보센터(law.go.kr)에서 확인하십시오.")
+
+
 def append_report_disclaimer(body: str) -> str:
     """보고서·의견서 본문 끝에 `DISCLAIMER_REPORT` 를 결정적으로 붙인다(멱등)."""
     if not body:

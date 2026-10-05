@@ -129,3 +129,41 @@ def test_doc_kinds_hint_reaches_qdrant_tool(monkeypatch):
     except Exception:
         pass  # 더블이 거친 부분은 상관없다 — 종별 전달만 본다
     assert seen.get("kinds") == ["expc"]
+
+
+# ── 현행본 미보유 고지 — 시행예정본만 인용된 법령 (2026-10-05 감사 L4·3-3) ────
+
+from src.legal import PENDING_ONLY_MARK, append_pending_only_notice, pending_only_laws
+
+
+def _doc(title, status="active", **kw):
+    return {"id": f"cite_doc_{title}", "number": 1, "source_kind": "doc",
+            "title": title, "snippet": "", "status": status, "verified": True, **kw}
+
+
+def test_pending_only_law_gets_notice():
+    cits = [_doc("의료법 제27조(무면허 의료행위 등 금지)", "amended_pending")]
+    out = append_pending_only_notice("본문", cits)
+    assert PENDING_ONLY_MARK in out and "의료법" in out and "law.go.kr" in out
+    assert append_pending_only_notice(out, cits) == out  # 멱등
+
+
+def test_law_with_current_citation_is_not_flagged():
+    """현행 조문이 하나라도 인용됐으면 '개정 예정 동반'일 뿐 — 고지하지 않는다."""
+    cits = [_doc("의료법 제27조", "active"), _doc("의료법 제27조", "amended_pending")]
+    assert pending_only_laws(cits) == []
+    assert append_pending_only_notice("본문", cits) == "본문"
+
+
+def test_pending_detected_from_effective_status_and_enforced():
+    cits = [_doc("약사법 제23조", "active", effective_status="미시행"),
+            _doc("식품위생법 별표 1", "active", enforced=False)]
+    assert pending_only_laws(cits) == ["약사법", "식품위생법"]
+
+
+def test_pending_notice_ignores_web_and_empty():
+    web = {"id": "cite_web_x", "number": 1, "source_kind": "web", "title": "뉴스",
+           "snippet": "", "status": "amended_pending", "verified": False}
+    assert append_pending_only_notice("본문", [web]) == "본문"
+    assert append_pending_only_notice("", [_doc("의료법 제1조", "amended_pending")]) == ""
+    assert append_pending_only_notice("본문", None) == "본문"

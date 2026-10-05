@@ -2238,12 +2238,20 @@ async def _run_turn(
     # 뿐 부착 코드가 없었다 — 2턴째부터, 복사본에는, 면책이 없었다. 법령 근거로
     # 답한 턴(인용 ≥1)마다 붙인다. 프롬프트 지시는 삭제했다(이중 부착 방지).
     if body and _turn_citation_count(turn_steps) > 0:
-        from src.legal import append_chat_disclaimer, append_feature_caveat
+        from src.legal import (
+            append_chat_disclaimer,
+            append_feature_caveat,
+            append_pending_only_notice,
+        )
 
         # 기능별 한계 고지(2026-10-03) — 프롬프트가 아니라 코드가 붙인다. 영향
         # 범위·인용 검증·조례 비교처럼 "빠진 것이 있을 수 있다"가 산출물의 핵심
         # 한계인 기능은, 모델이 그 말을 빼먹으면 변호사가 목록을 완결로 읽는다.
         body = append_feature_caveat(body, doc_kinds)
+        # 현행본 미보유 고지(2026-10-05) — 코퍼스가 시행예정본만 가진 법령(88개)은
+        # 모델이 "현행"으로 단정하기 쉽다. 인용 상태로 판정해 코드가 붙인다.
+        body = append_pending_only_notice(
+            body, [c for st in turn_steps for c in (st.get("citations") or [])])
         body = append_chat_disclaimer(body)
         emit({"type": "token", "text": "", "message_id": getattr(ai, "id", None)})
 
