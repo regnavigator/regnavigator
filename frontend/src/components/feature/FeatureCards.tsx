@@ -4,11 +4,14 @@
  * FeatureCards — 기능 카드 렌더 (2026-10-02).
  *
  * 같은 레지스트리를 두 레이아웃으로 그린다:
- *  - `list` : 첫 화면. 세로 나열, 설명이 길게 들어간다.
- *  - `grid` : 스레드 내 피커. 카테고리별 격자 — 기능이 20개가 돼도 버틴다.
+ *  - `tiles`: 첫 화면. **3×3 타일, 가로로 넘기는 페이지**(2026-10-05 요청 — 세로로 쭉
+ *            나열하면 아래쪽 기능은 스크롤해야 보이고, 몇 개가 있는지 가늠이 안 된다).
+ *  - `grid` : 스레드 내 피커. 검색과 함께 쓰는 세로 스크롤 격자.
  *
  * 레이아웃만 다르고 **정의와 실행은 공유**한다(`catalog` / `useRunFeature`).
  */
+
+import { useMemo, useRef, useState } from "react";
 
 import type { Feature } from "@/lib/features/catalog";
 
@@ -51,7 +54,7 @@ export function FeatureCards({
   selected,
 }: {
   features: Feature[];
-  layout: "list" | "grid";
+  layout: "tiles" | "grid";
   onPick: (f: Feature) => void;
   /**
    * 조립 모드(2026-10-02) — 고른 기능 id 를 **고른 순서대로**. 주어지면 grid
@@ -68,70 +71,8 @@ export function FeatureCards({
     );
   }
 
-  if (layout === "list") {
-    return (
-      <ul className="w-full max-w-[560px] divide-y divide-md-outline-variant/70 border-y border-md-outline-variant/70">
-        {features.map((f) => (
-          <li key={f.title}>
-            <button
-              type="button"
-              data-feature={f.title}
-              onClick={() => onPick(f)}
-              className="group relative flex w-full items-center gap-3 px-1 py-3 text-left transition-colors hover:bg-md-surface-container-low"
-            >
-              <span
-                className="material-symbols-outlined shrink-0 text-[19px] text-md-on-surface-variant group-hover:text-md-primary"
-                aria-hidden
-              >
-                {icon(f)}
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-[14px] font-medium text-md-on-surface">
-                  {f.title}
-                </span>
-                <span className="block truncate text-[12px] text-md-on-surface-variant">
-                  {f.category} · {f.subtitle}
-                </span>
-              </span>
-              <span
-                className="material-symbols-outlined shrink-0 text-[18px] text-md-on-surface-variant/50 group-hover:text-md-primary"
-                aria-hidden
-              >
-                chevron_right
-              </span>
-
-              {/* 호버 말풍선 — 이 기능으로 무엇을 얻는지. 설명을 아래에 블록으로
-                  따로 두면 카드와 같은 말을 두 번 하게 된다(2026-10-02 지적).
-                  좁은 화면(터치)에서는 숨긴다 — 호버가 없는 환경이라 가려지기만 한다. */}
-              {f.expects.length ? (
-                <span
-                  role="tooltip"
-                  data-tooltip={f.title}
-                  className="pointer-events-none absolute left-0 top-full z-20 mt-1 w-full rounded-[10px] border border-md-outline-variant bg-md-surface-container-lowest px-3 py-2 opacity-0 shadow-lg transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100 group-active:opacity-100 lg:left-full lg:top-1/2 lg:ml-3 lg:mt-0 lg:w-[260px] lg:-translate-y-1/2"
-                >
-                  <span className="mb-1 block text-[10.5px] font-semibold tracking-[0.02em] text-md-on-surface-variant">
-                    {f.category}
-                  </span>
-                  {f.expects.map((e) => (
-                    <span key={e} className="mt-0.5 flex gap-1.5">
-                      <span
-                        className="material-symbols-outlined mt-[1px] text-[13px] text-md-primary"
-                        aria-hidden
-                      >
-                        check_small
-                      </span>
-                      <span className="text-[11.5px] leading-[1.5] text-md-on-surface-variant">
-                        {e}
-                      </span>
-                    </span>
-                  ))}
-                </span>
-              ) : null}
-            </button>
-          </li>
-        ))}
-      </ul>
-    );
+  if (layout === "tiles") {
+    return <FeatureTiles features={features} onPick={onPick} />;
   }
 
   // grid — **평평한 한 격자**로 그린다(2026-10-02).
@@ -199,5 +140,154 @@ export function FeatureCards({
         );
       })}
     </ul>
+  );
+}
+
+/* ─────────────────── tiles — 3×3 페이지 ─────────────────── */
+
+const TILES_PER_PAGE = 9;
+
+function chunk<T>(xs: T[], n: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < xs.length; i += n) out.push(xs.slice(i, i + n));
+  return out;
+}
+
+/**
+ * 스냅 스크롤 페이지 — 터치는 옆으로 밀고, 마우스는 화살표·점으로 넘긴다.
+ * 페이지 폭은 컨테이너 폭이라 `scrollLeft / clientWidth` 가 곧 페이지 번호다.
+ * 좁은 화면(<640px)은 2열로 떨어뜨린다 — 3열이면 타일이 100px 아래로 깨진다.
+ */
+function FeatureTiles({
+  features,
+  onPick,
+}: {
+  features: Feature[];
+  onPick: (f: Feature) => void;
+}) {
+  const pages = useMemo(() => chunk(features, TILES_PER_PAGE), [features]);
+  const ref = useRef<HTMLDivElement>(null);
+  const [page, setPage] = useState(0);
+  const total = pages.length;
+
+  const go = (i: number) => {
+    const el = ref.current;
+    if (!el) return;
+    const n = Math.max(0, Math.min(i, total - 1));
+    el.scrollTo({ left: n * el.clientWidth, behavior: "smooth" });
+    setPage(n);
+  };
+  const onScroll = () => {
+    const el = ref.current;
+    if (!el || !el.clientWidth) return;
+    setPage(Math.round(el.scrollLeft / el.clientWidth));
+  };
+
+  const arrow =
+    "absolute top-1/2 hidden h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full border border-md-outline-variant bg-md-surface-container-lowest text-md-on-surface-variant shadow-sm transition-colors hover:border-md-primary hover:text-md-primary disabled:cursor-default disabled:opacity-25 disabled:hover:border-md-outline-variant disabled:hover:text-md-on-surface-variant sm:inline-flex";
+
+  return (
+    <div className="w-full max-w-[720px]" data-testid="feature-tiles">
+      <div className="relative">
+        <div
+          ref={ref}
+          onScroll={onScroll}
+          role="region"
+          aria-roledescription="carousel"
+          aria-label="기능 목록"
+          className="flex snap-x snap-mandatory overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        >
+          {pages.map((pg, i) => (
+            <ul
+              key={i}
+              aria-label={`${i + 1} / ${total} 페이지`}
+              aria-hidden={i !== page}
+              className="grid w-full shrink-0 snap-start grid-cols-2 gap-2 px-0.5 sm:grid-cols-3"
+            >
+              {pg.map((f) => (
+                <li key={f.id}>
+                  <button
+                    type="button"
+                    data-feature={f.title}
+                    tabIndex={i === page ? 0 : -1}
+                    onClick={() => onPick(f)}
+                    title={f.expects.join("\n")}
+                    className="flex h-full min-h-[104px] w-full flex-col gap-1 rounded-[10px] border border-md-outline-variant bg-md-surface-container-lowest p-3 text-left transition-colors hover:border-md-primary hover:bg-md-surface-container-low"
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <span
+                        className="material-symbols-outlined text-[16px] text-md-primary"
+                        aria-hidden
+                      >
+                        {icon(f)}
+                      </span>
+                      <span className="truncate text-[10.5px] font-medium tracking-[0.02em] text-md-on-surface-variant">
+                        {f.category}
+                      </span>
+                    </span>
+                    <span className="text-[13px] font-semibold leading-snug text-md-on-surface">
+                      {f.title}
+                    </span>
+                    <span className="line-clamp-2 text-[11.5px] leading-[1.5] text-md-on-surface-variant">
+                      {f.subtitle}
+                    </span>
+                    {f.expects.length ? (
+                      <span className="sr-only">{f.expects.join(" · ")}</span>
+                    ) : null}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ))}
+        </div>
+
+        {total > 1 ? (
+          <>
+            <button
+              type="button"
+              aria-label="이전 기능"
+              disabled={page === 0}
+              onClick={() => go(page - 1)}
+              className={arrow + " -left-11"}
+            >
+              <span className="material-symbols-outlined text-[20px]" aria-hidden>
+                chevron_left
+              </span>
+            </button>
+            <button
+              type="button"
+              aria-label="다음 기능"
+              disabled={page >= total - 1}
+              onClick={() => go(page + 1)}
+              className={arrow + " -right-11"}
+            >
+              <span className="material-symbols-outlined text-[20px]" aria-hidden>
+                chevron_right
+              </span>
+            </button>
+          </>
+        ) : null}
+      </div>
+
+      {total > 1 ? (
+        <div className="mt-3 flex items-center justify-center gap-2" aria-hidden>
+          {pages.map((_, i) => (
+            <button
+              key={i}
+              type="button"
+              tabIndex={-1}
+              onClick={() => go(i)}
+              className={
+                "h-1.5 rounded-full transition-all " +
+                (i === page ? "w-5 bg-md-primary" : "w-1.5 bg-md-outline-variant hover:bg-md-on-surface-variant")
+              }
+            />
+          ))}
+          <span className="ml-1 text-[11px] tabular-nums text-md-on-surface-variant">
+            {page + 1} / {total}
+          </span>
+        </div>
+      ) : null}
+    </div>
   );
 }

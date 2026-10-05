@@ -69,6 +69,14 @@ import { addWatch, listWatch, removeWatch } from "@/lib/client/monitorThreads";
 import type { ChatState } from "@/lib/store/types";
 import { featuresFor } from "@/lib/features/catalog";
 import { CompositionPanel } from "@/components/panel/CompositionPanel";
+
+/**
+ * 기능 조합 진입을 숨긴다(2026-10-05 결정). "기능과 조합이 중복된다 — 기능을 그냥
+ * 반복해서 쓰면 된다." 조합이 더하는 것(숨은 턴·종합 1건·단계별 파일·자동 실행)은
+ * 별도 개념으로 배울 가치가 없다는 판단. 코드·백엔드 `/workflow` 는 그대로 두고
+ * 진입점만 끈다 — 직무(task) 템플릿이 다시 필요해지면 이 플래그로 되살린다.
+ */
+const COMPOSER_ENABLED = false;
 import {
   saveComposition,
   stepMessage,
@@ -559,7 +567,9 @@ function PageShellInner() {
             configured={configured}
             onUseAsForm={showPro ? handleUseAsForm : undefined}
             onOpenComposer={
-              showPro && mode !== "monitor" ? () => void openComposer() : undefined
+              COMPOSER_ENABLED && showPro && mode !== "monitor"
+                ? () => void openComposer()
+                : undefined
             }
             shellError={shellError}
             clearShellError={() => setShellError(null)}
@@ -717,7 +727,9 @@ function PageShellInner() {
               threadsOpen={threadsOpen}
               onOpenThreads={openThreads}
               onOpenComposer={
-              showPro && mode !== "monitor" ? () => void openComposer() : undefined
+              COMPOSER_ENABLED && showPro && mode !== "monitor"
+                ? () => void openComposer()
+                : undefined
             }
               rightPanelToggle={{
                 open: showRightPanel,

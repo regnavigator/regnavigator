@@ -88,7 +88,7 @@ export function FeaturePicker({
         >
           <p className="px-1 pb-1.5 text-[11px] leading-snug text-md-on-surface-variant">
             이어서 할 작업을 고르세요. 같은 대화 안에서 진행되며 앞 내용을 그대로
-            이어받습니다. 여러 기능을 묶어 돌리려면 <b>조합</b>을 쓰세요.
+            이어받습니다. 같은 기능을 몇 번이든 다시 쓸 수 있습니다.
           </p>
 
           {/* 검색은 **항상** 보인다(2026-10-02). 건수에 따라 나타났다 사라지면

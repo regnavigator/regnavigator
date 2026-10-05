@@ -93,7 +93,7 @@ export function EmptyHero({ configured, onPickPrompt }: Props) {
       {onPickPrompt ? (
         <FeatureCards
           features={features}
-          layout="list"
+          layout="tiles"
           onPick={(f) => setPicked(f)}
         />
       ) : null}
