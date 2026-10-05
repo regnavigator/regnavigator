@@ -37,10 +37,27 @@ def main() -> int:
     from src.persistence import field_crypto
 
     try:
-        print(f"✓ filled_values 암호화 키: {field_crypto.validate_key()}")
+        mode = field_crypto.validate_key()
+        print(f"✓ 저장 암호화 키: {mode}")
     except RuntimeError as e:
         print(f"⚠ {e}")
         rc = 1
+        mode = "error"
+
+    # 시크릿 분리(2026-10-05, 감사 I5) — 경고만(rc 유지). 둘 다 "지금 돌아가긴 한다"가
+    # 문제라, 배포를 막는 대신 점검 때마다 눈에 띄게 한다.
+    import os
+
+    if mode == "derived":
+        print("⚠ 암호화 키가 NEXTAUTH_SECRET 파생 — 세션 시크릿을 돌리면 서식 기입값·기밀 "
+              "메시지·조합 파일이 전부 복호화 불가가 된다. FILLED_VALUES_ENC_KEY 를 따로 두고 "
+              "(쉼표로 기존 파생 키와 병기해 회전) NEXTAUTH_SECRET 과 분리할 것")
+    rag = (os.getenv("RAG_SEARCH_API_KEY") or "").strip()
+    shared = [k for k in ("PII_NER_API_KEY", "INTENT_API_KEY")
+              if rag and (os.getenv(k) or "").strip() == rag]
+    if shared:
+        print(f"⚠ DGX API 키 공유: RAG_SEARCH_API_KEY == {', '.join(shared)} — 하나가 새면 "
+              "검색·PII·의도 서버가 같이 뚫린다. 서비스별 키로 분리할 것(DGX 쪽 .env 동시 교체)")
     return rc
 
 

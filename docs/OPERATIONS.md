@@ -242,8 +242,12 @@ python scripts/maintenance.py schedule 04:00 04:20 "데이터 갱신 중"   # �
    - `.env`·`.env.docker` 의 **백업 사본(`.env.bak` 등)을 만들지 않는다.** 과거 노출 사고의 원인이었다.
    - `.env*` 는 `chmod 600`, 커밋 금지. 커밋은 경로를 명시해 stage 한다(`git add -A` 금지).
    - 로테이션: `python scripts/rotate_secrets.py`(체크리스트) → 교체 → `--verify`.
-   - 기입값 암호화 키(`FILLED_VALUES_ENC_KEY`)는 Fernet urlsafe base64 **44자, 끝 `=` 포함**. 이미 암호화된 행이
-     있으면 새 키로 갈아 끼우지 말고 이전 키를 쉼표로 함께 둔다.
+   - 저장 암호화 키(`FILLED_VALUES_ENC_KEY`)는 Fernet urlsafe base64 **44자, 끝 `=` 포함**. 이미 암호화된 행이
+     있으면 새 키로 갈아 끼우지 말고 이전 키를 쉼표로 함께 둔다. 이 키 하나가 서식 기입값·기밀 메시지
+     (`chat_messages.sensitive`)·조합 파일(`workflow_files`) 을 전부 보호한다(2026-10-03~).
+   - **`NEXTAUTH_SECRET` 과 분리할 것** — 키가 없으면 세션 시크릿 파생 키로 암호화되는데, 그러면 세션
+     시크릿을 돌리는 순간 암호화된 행 전부가 복호화 불가가 된다. `check_config.py` 가 파생 상태와
+     DGX API 키 공유(`RAG_SEARCH_API_KEY` == `PII_NER_API_KEY`/`INTENT_API_KEY`)를 경고한다.
    - `/readyz` 는 공개 엔드포인트라 예외 문자열(DSN·내부 주소)을 싣지 않는다 — 이 원칙을 유지할 것.
 9. **best-effort `except` 주의.** 배선 오류를 조용히 삼킨다. 드물게 실행되는 분기(메일 발송 등)는 e2e 로 검증하고,
    사용자에게 나가는 기능의 e2e 는 로컬이 아니라 **배포 컨테이너 안에서**(`docker compose exec`) 돌린다.

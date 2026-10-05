@@ -357,8 +357,10 @@ ENV_REGISTRY: tuple[Setting, ...] = (
             "이 일수마다 한 번은 강제 실행(검색 데이터 변동 감시)"),
     Setting("QREG_ALWAYS", "", "chatloop", "1=야간 골든셋 회귀를 변경 여부와 무관하게 매일 실행(구 동작)"),
     Setting("FILLED_VALUES_ENC_KEY", "", "chatloop",
-            "서류 기입값(reports.filled_values) 저장 암호화 Fernet 키. 쉼표로 여러 개=회전. "
-            "미설정 시 NEXTAUTH_SECRET 파생 키로 암호화(둘 다 없으면 평문·경고)",
+            "저장 암호화 Fernet 키 — 서류 기입값(reports.filled_values)·기밀 메시지"
+            "(chat_messages.sensitive)·조합 파일(workflow_files). 쉼표로 여러 개=회전. "
+            "미설정 시 NEXTAUTH_SECRET 파생 키(세션 시크릿 회전 시 전부 복호화 불가 — 분리 권장). "
+            "둘 다 없으면 평문·경고",
             secret=True),
     Setting("IDENT_AUDIT_DISABLE", "", "chatloop",
             "1=식별자 대조 감사 끔(답변의 서식·별표 번호 ↔ 이번 턴 근거 결정적 대조, events.identifier_audit)"),
