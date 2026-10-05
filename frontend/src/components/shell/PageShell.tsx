@@ -51,6 +51,7 @@ import {
 } from "@/lib/client/threads";
 import { useChatState } from "@/lib/store/useChatState";
 import { articleKeyFromCitation } from "@/lib/client/article";
+import { formDocKindOf } from "@/lib/formEntry";
 import type { ChatAttachmentPayload } from "@/lib/store/turns";
 import type { Citation } from "@/lib/store/types";
 import { useUsage } from "@/lib/store/useUsage";
@@ -68,7 +69,7 @@ import { WATCH_CHANGED_EVENT } from "@/components/monitor/WatchPanel";
 import { addWatch, listWatch, removeWatch } from "@/lib/client/monitorThreads";
 import type { ChatState } from "@/lib/store/types";
 import { type Feature, featuresFor } from "@/lib/features/catalog";
-import { CompositionPanel } from "@/components/panel/CompositionPanel";
+import { CompositionPanel, type FormCitation } from "@/components/panel/CompositionPanel";
 import {
   type Composition,
   type CompositionStep,
@@ -116,6 +117,7 @@ function PageShellInner() {
     setCitation,
     setDocPath,
     setDocumentId,
+    composer,
     setComposer,
   } = useRightPanel();
   // 404 stale thread (backend 재시작·삭제) → `/new` 으로 이동 → EmptyHero로 복귀.
@@ -142,6 +144,8 @@ function PageShellInner() {
   const stopRef = useRef(false);
   // 루프 안에서 최신 실행 상태를 읽어야 한다 — 클로저에 갇힌 값은 영원히 true 다.
   const chatRunningRef = useRef(false);
+  const chatStateRef = useRef(chat.state);
+  chatStateRef.current = chat.state;
   chatRunningRef.current = chat.isRunning;
 
   // 서버가 진실원 — 스레드가 바뀌거나 새로고침하면 그 값으로 맞춘다.
@@ -161,7 +165,6 @@ function PageShellInner() {
    */
   const openComposer = useCallback(async () => {
     setComposer(true);
-    setRpOpen(true);
     if (threadId || composerThreadRef.current) return;
     composerThreadRef.current = true;
     try {
@@ -174,7 +177,7 @@ function PageShellInner() {
     } finally {
       composerThreadRef.current = false;
     }
-  }, [setComposer, setRpOpen, threadId, router]);
+  }, [setComposer, threadId, router]);
 
   /**
    * 세션이 시작되면(첫 턴) 기능연계 패널을 자동으로 열어 고정한다(2026-10-05 지침).
@@ -188,8 +191,7 @@ function PageShellInner() {
     if (autoOpenedRef.current === threadId) return;
     autoOpenedRef.current = threadId;
     setComposer(true);
-    setRpOpen(true);
-  }, [threadId, firstTurn, showPro, mode, setComposer, setRpOpen]);
+  }, [threadId, firstTurn, showPro, mode, setComposer]);
 
   /** 패널의 "바로 실행" — 기능 하나를 보이는 턴으로 지금 보낸다. */
   const runFeatureNow = useCallback(
@@ -199,7 +201,7 @@ function PageShellInner() {
           duration: 7000,
         });
       }
-      void chat.send(stepMessage(f, st, 0), {
+      void chat.send(stepMessage(f, st, 0, { fromConversation: chat.state.turns.length > 0 }), {
         confidential: st.confidential,
         workflowFileIds: st.files.map((x) => x.id),
         docKinds: f.docKinds,
@@ -252,9 +254,17 @@ function PageShellInner() {
       }
 
       setComposing(true);
+      // 연계가 도는 동안은 단계 턴을 **보이게** 한다(2026-10-05 지적: "프롬프트가
+      // 채팅창에 나오지도 않고 답변 생성 중이라고만 나와 순차로 도는지 알 수 없다").
+      // 끝나면 "과정 숨기기"로 접을 수 있다.
       stopRef.current = false;
-      let cur = c.cursor >= c.steps.length ? 0 : c.cursor;
-      let steps = c.steps.slice();
+      const fromConversation = chat.state.turns.length > 0;
+      const restart = c.status === "done" || c.cursor >= c.steps.length;
+      let cur = restart ? 0 : c.cursor;
+      let steps = restart ? c.steps.map((x) => ({ ...x, done: false })) : c.steps.slice();
+      // 패널의 ✓·"연계 n/n" 이 돌기 시작하자마자 풀리도록 먼저 저장한다(2026-10-05 실측:
+      // 재실행 중에도 전 단계가 ✓ 로 보였다).
+      await persistComposition({ ...c, steps, cursor: cur, mode: runMode, status: "running" });
 
       try {
         while (cur < steps.length) {
@@ -273,7 +283,7 @@ function PageShellInner() {
           }
 
           // 단계 = 숨은 턴. 기밀은 **이 단계의 값**을 쓴다(전역 토글 아님).
-          await chat.send(stepMessage(f, st, cur), {
+          await chat.send(stepMessage(f, st, cur, { fromConversation }), {
             hidden: true,
             confidential: st.confidential,
             workflowFileIds: st.files.map((x) => x.id),
@@ -284,12 +294,31 @@ function PageShellInner() {
             // 침묵 중단 금지(2026-10-03). 종전엔 5분 상한·중단 모두 break 만 하고
             // 아무 표시가 없었다 — 조합이 조용히 끝나고 화면은 아무 일 없던 것처럼.
             if (!stopRef.current) {
-              toast.error("조합이 중단됐습니다", {
+              toast.error("연계가 중단됐습니다", {
                 description: `${f.title} 단계가 5분 안에 끝나지 않았습니다. 다시 실행하면 이 단계부터 이어집니다.`,
                 duration: 9000,
               });
             }
             break;
+          }
+          // 턴이 **오류로** 끝났으면 멈춘다(2026-10-05 실측). 종전엔 403(동의 필요)·
+          // 429 로 모든 단계가 즉시 실패해도 done 으로 찍고 빈 종합까지 보냈다 —
+          // 사용자는 "답변 생성 중"만 보다가 아무 결과도 받지 못했다.
+          // `Turn.status === "error"` 는 도구 단계 하나(검색 실패 등)만 틀려도 켜진다 —
+          // 답이 나왔으면 그 턴은 성공이다. 답이 **없고** 상태 오류가 있을 때만 실패.
+          const lastTurn = chatStateRef.current.turns.at(-1);
+          const turnFailed =
+            !lastTurn?.answer?.content?.trim() &&
+            (lastTurn?.status === "error" || !!chatStateRef.current.error);
+          if (turnFailed) {
+            toast.error("연계가 중단됐습니다", {
+              description: `${f.title} 단계가 오류로 끝났습니다 — ${
+                chatStateRef.current.error?.message ?? "채팅창의 오류 메시지를 확인해 주세요."
+              } 해결한 뒤 다시 실행하면 이 단계부터 이어집니다.`,
+              duration: 12000,
+            });
+            await persistComposition({ ...c, steps, cursor: cur, mode: runMode, status: "running" });
+            return;
           }
 
           steps = steps.map((x, i) => (i === cur ? { ...x, done: true } : x));
@@ -465,6 +494,32 @@ function PageShellInner() {
 
   // 표시 여부 = mode가 있고 사용자가 닫지 않았을 때
   const showRightPanel = Boolean(rightMode) && rpOpen;
+  // 기능연계 패널(2026-10-05) — 근거 패널과 독립. 전문가 전용.
+  const showComposerPanel = composer && showPro && mode !== "monitor";
+
+  /** 대화에 나온 서식 인용 전부 — form_find 가 목록으로 보여 준다(파일 업로드 대신). */
+  const formCitations = useMemo<FormCitation[]>(
+    () => findAllFormCitations(chat.state).map((f) => ({
+      id: f.key, title: f.title || f.article || f.key, articleKey: f.key,
+    })),
+    [chat.state],
+  );
+
+  const composerPanel = (
+    <CompositionPanel
+      threadId={threadId}
+      mode={mode}
+      hasTurns={chat.state.turns.length > 0}
+      composition={composition}
+      running={composing}
+      formCitations={formCitations}
+      onChange={(c) => void persistComposition(c)}
+      onRun={(m) => void runComposition(m)}
+      onRunNow={runFeatureNow}
+      onUseAsForm={showPro ? handleUseAsForm : undefined}
+      onStop={() => { stopRef.current = true; chat.stop(); }}
+    />
+  );
 
   // close 시 240ms out 슬라이드 후 실제 unmount (globals.css animate-md-panel-out-* 타이밍 정합).
   // **closing 도중 외부 신호(citation chip 클릭 등)로 패널 다시 열리면 timer cancel** —
@@ -588,7 +643,7 @@ function PageShellInner() {
       ro.disconnect();
       window.removeEventListener("resize", update);
     };
-  }, [threadsOpen, showRightPanel, rightMode]);
+  }, [threadsOpen, showRightPanel, rightMode, showComposerPanel]);
 
   // ── 좁은 화면(모바일) 레이아웃 — 3-pane 대신 단일 컬럼 + 드로어/오버레이 ──
   // resizable PanelGroup 은 1024px 미만에서 성립하지 않아(사이드바 16% ≈ 60~160px)
@@ -615,6 +670,7 @@ function PageShellInner() {
               open: showRightPanel,
               onToggle: () => setRpOpen(!rpOpen),
             }}
+            forceProcess={composing}
           />
         </div>
 
@@ -659,21 +715,23 @@ function PageShellInner() {
             </header>
             <div className="min-h-0 flex-1">
               <RightPanel state={chat.state} isRunning={chat.isRunning} reportRunning={chat.reportRunning} reportQueueAhead={chat.state.report_queue_ahead ?? null} reportProgress={chat.state.report_progress ?? null}
-                composerSlot={
-                  <CompositionPanel
-                    threadId={threadId}
-                    mode={mode}
-                    composition={composition}
-                    running={composing}
-                    onChange={(c) => void persistComposition(c)}
-                    onRun={(m) => void runComposition(m)}
-                    onRunNow={runFeatureNow}
-                    onStop={() => { stopRef.current = true; chat.stop(); }}
-                  />
-                }
                 onUseAsForm={showPro ? handleUseAsForm : undefined}
                 watch={watchApi} />
             </div>
+          </div>
+        ) : null}
+
+        {/* 기능연계 — 좁은 화면에선 전체 화면 오버레이(2026-10-05) */}
+        {showComposerPanel ? (
+          <div className="fixed inset-0 z-40 flex flex-col bg-md-surface">
+            <header className="flex h-11 shrink-0 items-center justify-between border-b border-md-outline-variant px-3">
+              <span className="text-[12px] font-semibold text-md-on-surface-variant">기능연계</span>
+              <button type="button" onClick={() => setComposer(false)} aria-label="기능연계 닫기"
+                      className="inline-flex h-8 w-8 items-center justify-center rounded text-md-on-surface-variant hover:bg-md-surface-container-low hover:text-md-on-surface">
+                <span className="material-symbols-outlined text-[20px]" aria-hidden>close</span>
+              </button>
+            </header>
+            <div className="min-h-0 flex-1">{composerPanel}</div>
           </div>
         ) : null}
 
@@ -705,7 +763,7 @@ function PageShellInner() {
           // 신호 등)이면 그 시각이 그대로 노출됨. **autoSaveId를 closed 케이스에도
           // 동일 모드값으로 고정** — 닫힌 상태에선 어차피 우측 Panel을 mount 안 하므로
           // 폭 persist에 무관. group은 한 ID로 유지 → mode 토글 없이는 remount X.
-          autoSaveId={`root-${rightMode === "artifact" ? "artifact-v2" : "side-v3"}`}
+          autoSaveId={`root-${rightMode === "artifact" ? "artifact-v2" : "side-v3"}${showComposerPanel ? "-f" : ""}`}
           className="h-full w-full"
         >
           {(threadsOpen || threadsClosing) && (
@@ -744,12 +802,12 @@ function PageShellInner() {
             order={2}
             defaultSize={
               !showRightPanel
-                ? 84
+                ? showComposerPanel ? 66 : 84
                 : rightMode === "artifact"
-                  ? 56 // artifact: 우측 44%
-                  : 64 // side(citation·reports·deep·split): 우측 36%
+                  ? showComposerPanel ? 38 : 56 // artifact: 우측 44%
+                  : showComposerPanel ? 30 : 64 // side(citation·reports·deep·split): 우측 36%
             }
-            minSize={36}
+            minSize={30}
           >
             <ChatColumn
               chat={chat}
@@ -768,6 +826,7 @@ function PageShellInner() {
                 open: showRightPanel,
                 onToggle: toggleRight,
               }}
+              forceProcess={composing}
             />
           </Panel>
 
@@ -786,7 +845,7 @@ function PageShellInner() {
                 id="right"
                 order={3}
                 defaultSize={rightMode === "artifact" ? 44 : 36}
-                minSize={24}
+                minSize={20}
                 maxSize={55}
                 className={
                   "border-l border-md-outline-variant transition-colors duration-[var(--motion-fast)] " +
@@ -796,23 +855,37 @@ function PageShellInner() {
                 }
               >
                 <RightPanel state={chat.state} isRunning={chat.isRunning} reportRunning={chat.reportRunning} reportQueueAhead={chat.state.report_queue_ahead ?? null} reportProgress={chat.state.report_progress ?? null}
-                composerSlot={
-                  <CompositionPanel
-                    threadId={threadId}
-                    mode={mode}
-                    composition={composition}
-                    running={composing}
-                    onChange={(c) => void persistComposition(c)}
-                    onRun={(m) => void runComposition(m)}
-                    onRunNow={runFeatureNow}
-                    onStop={() => { stopRef.current = true; chat.stop(); }}
-                  />
-                }
                 onUseAsForm={showPro ? handleUseAsForm : undefined}
                 watch={watchApi} />
               </Panel>
             </>
           )}
+
+          {/* 기능연계 — 근거 패널과 **별도**로 맨 오른쪽에 선다(2026-10-05 지침). 폭은
+              근거 패널의 절반. 둘이 같이 열려도 채팅이 30% 아래로 떨어지지 않게
+              기본값을 잡았다(16 + 30 + 36 + 18 = 100). */}
+          {showComposerPanel ? (
+            <>
+              <PanelResizeHandle aria-label="기능연계 패널 폭 조정"
+                                 className="group relative w-px bg-transparent outline-none">
+                <span className="absolute inset-y-0 -left-1 -right-1" aria-hidden />
+              </PanelResizeHandle>
+              <Panel id="features" order={4} defaultSize={18} minSize={14} maxSize={28}
+                     className="border-l border-md-outline-variant">
+                <aside aria-label="기능연계" className="flex h-full w-full flex-col bg-md-surface-container-lowest">
+                  <div className="flex h-9 shrink-0 items-center gap-1 border-b border-md-outline-variant px-2.5">
+                    <span className="material-symbols-outlined text-[15px] text-md-primary" aria-hidden>account_tree</span>
+                    <span className="text-[11.5px] font-semibold text-md-on-surface-variant">기능연계</span>
+                    <button type="button" onClick={() => setComposer(false)} title="기능연계 패널 닫기"
+                            className="ml-auto inline-flex h-6 w-6 items-center justify-center rounded text-md-on-surface-variant hover:bg-md-surface-container-low hover:text-md-on-surface">
+                      <span className="material-symbols-outlined text-[15px]" aria-hidden>close</span>
+                    </button>
+                  </div>
+                  <div className="min-h-0 flex-1">{composerPanel}</div>
+                </aside>
+              </Panel>
+            </>
+          ) : null}
         </PanelGroup>
       </div>
 
@@ -851,6 +924,8 @@ type ChatColumnProps = {
   onOpenThreads: () => void;
   /** RightPanel 토글 가능 시 (mode 활성). null이면 토글 안 표시 */
   rightPanelToggle: { open: boolean; onToggle: () => void };
+  /** 연계가 도는 동안 숨은 단계 턴을 강제로 보인다(2026-10-05). */
+  forceProcess?: boolean;
   /** 조합 패널 열기(2026-10-02) — 전문가 모드에서만 전달된다. */
   onOpenComposer?: () => void;
 };
@@ -885,6 +960,26 @@ function findRecentFormCitations(
   return lastGroup;
 }
 
+/** 스레드 전체의 서식 인용(등장 순, 중복 제거) — 기능연계의 form_find 목록용(2026-10-05). */
+function findAllFormCitations(
+  state: ChatState,
+): { key: string; title: string; article: string }[] {
+  const cats = new Set(["법령별표서식", "행정규칙별표서식", "자치법규별표서식"]);
+  const out: { key: string; title: string; article: string }[] = [];
+  const seen = new Set<string>();
+  for (const step of state.steps ?? []) {
+    for (const c of step.citations ?? []) {
+      if (!c.doc_category || !cats.has(c.doc_category)) continue;
+      if (formDocKindOf(c) !== "form") continue;
+      const key = articleKeyFromCitation(c);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      out.push({ key, title: c.title ?? "", article: c.article ?? "" });
+    }
+  }
+  return out;
+}
+
 function ChatColumn({
   chat,
   configured,
@@ -897,6 +992,7 @@ function ChatColumn({
   onOpenThreads,
   rightPanelToggle,
   onOpenComposer,
+  forceProcess,
 }: ChatColumnProps) {
   const { mode } = useMode();
   const router = useRouter();
@@ -917,8 +1013,10 @@ function ChatColumn({
     [chat.state.turns],
   );
   const visibleTurns = useMemo(
-    () => (showProcess ? chat.state.turns : chat.state.turns.filter((t) => !t.hidden)),
-    [chat.state.turns, showProcess],
+    () => (showProcess || forceProcess
+      ? chat.state.turns
+      : chat.state.turns.filter((t) => !t.hidden)),
+    [chat.state.turns, showProcess, forceProcess],
   );
 
   // 의견서 초안(2026-10-01) — 입력창 버튼이 이벤트를 쏘면 여기서 생성·오픈한다.

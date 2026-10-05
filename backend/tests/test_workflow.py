@@ -412,3 +412,25 @@ def test_workflow_file_ids_become_attachments(api):
         RC._compose_message = orig
 
     assert captured.get("atts") == [("소장.txt", "사건 사실관계 본문")]
+
+
+# ── 프리필 복원 (2026-10-05 실측 버그) ─────────────────────────────────────
+
+from src.workflow import _SUGGEST_PREFILL, _parse_values, join_prefill
+
+
+def test_join_prefill_restores_value_object_response():
+    """모델이 프리필 뒤 값 객체만 돌려준 경우 — `{` 로 시작해도 붙여야 한다."""
+    tail = '{"subject": "체외진단 의료기기 수입", "detail": ""}}'
+    full = join_prefill(_SUGGEST_PREFILL, tail)
+    assert _parse_values(full) == {"subject": "체외진단 의료기기 수입", "detail": ""}
+
+
+def test_join_prefill_leaves_full_json_alone():
+    full = '{"values": {"subject": "x"}}'
+    assert join_prefill(_SUGGEST_PREFILL, "  " + full) == full
+    assert _parse_values(full) == {"subject": "x"}
+
+
+def test_join_prefill_plain_tail():
+    assert _parse_values(join_prefill(_SUGGEST_PREFILL, ' {"a": "1"}}')) == {"a": "1"}

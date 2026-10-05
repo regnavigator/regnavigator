@@ -173,6 +173,21 @@ _SUGGEST_PREFILL = '{"values":'
 SUGGEST_CONTEXT_CHARS = 6000
 
 
+def join_prefill(prefill: str, text: str) -> str:
+    """어시스턴트 프리필 뒤에 이어진 응답을 완전한 JSON 으로 되돌린다.
+
+    종전엔 "응답이 `{` 로 시작하지 않으면 프리필을 앞에 붙인다"였는데, 프리필이
+    `{"values":` 처럼 **값 자리에서 끊기면** 모델은 `{"subject": …}}` 를 돌려준다 —
+    `{` 로 시작하므로 프리필을 안 붙였고, 그 결과는 닫는 괄호가 하나 남는 깨진 JSON 이라
+    항상 `{}` 가 됐다(2026-10-05 실측: 입력 제안이 전부 비어 있던 원인). 응답이 이미
+    프리필로 시작하는 경우(모델이 통째로 되풀이)만 그대로 둔다.
+    """
+    t = (text or "").lstrip()
+    if t.startswith(prefill):
+        return t
+    return prefill + t
+
+
 def _parse_values(text: str) -> dict[str, str]:
     import re as _re
 
@@ -237,8 +252,8 @@ async def suggest_values(
     if isinstance(content, list):
         content = "".join(b.get("text", "") for b in content if isinstance(b, dict))
     text = str(content or "")
-    if model is None and not text.lstrip().startswith("{"):
-        text = _SUGGEST_PREFILL + text
+    if model is None:
+        text = join_prefill(_SUGGEST_PREFILL, text)
 
     vals = _parse_values(text)
     # 모르는 항목을 지어내지 않도록, 요청한 키만 남긴다.

@@ -1,25 +1,22 @@
 "use client";
 
 /**
- * CompositionPanel — "기능연계" 패널 (2026-10-05 재설계).
+ * CompositionPanel — "기능연계" 패널 (2026-10-05 재설계 2차).
  *
- * 사용자 지침(2026-10-05): "간단한 기능은 첫 화면 타일에서 바로 시작한다(유지). 세션
- * 중간에도 기능을 골라 쓸 수 있어야 하고, 기능들을 **연계**해서도 쓸 수 있어야 한다.
- * 세션이 시작되면 이 기능이 오른쪽 패널에 고정되고, 하나를 골라 쓰거나 여러 개를
- * 연계한다. 기능 찾기도 된다."
+ * 사용자 지침(2026-10-05):
+ *  - 우측에 **따로** 선다 — 근거(인용) 패널과 동시에 열려야 한다. 폭은 근거 패널의 절반.
+ *  - 위 2/3: 기능 찾기 + 타일을 **1열**로. 아래 1/3: 고른 기능의 입력.
+ *  - 대화 중에 기능을 고르면 **대화 내용으로 입력이 먼저 채워져** 있어야 하고(고칠 수
+ *    있게), 서식 작성은 파일을 올리라고 하지 말고 **대화에 나온 서식 목록**에서 고르거나
+ *    더 찾게 한다.
+ *  - 연계는 앞 기능의 결과가 다음 입력이 되므로, 따로 적을 게 없으면 **입력 없이도**
+ *    이어져야 한다.
  *
- * 그래서 종전의 두 표면 — 입력창 팝오버 피커(단일 실행)와 조합 패널(연계) — 를 이 한
- * 패널로 합쳤다. 흐름은 하나다:
- *
- *   타일(검색 가능) 클릭 → 입력·파일·기밀 채움 → [바로 실행] 또는 [연계에 추가]
- *
- * - 바로 실행: 보이는 턴 하나로 지금 보낸다.
- * - 연계에 추가: 아래 목록에 쌓인다. 2단계 이상이면 각 단계는 **숨은 턴**으로 돌고
- *   마지막에 종합 1건만 보인다(단계마다 답을 쏟으면 읽을 수 없는 대화가 된다).
- *   단계별 모드는 한 단계마다 멈춰 사람이 검토하고, 한번에 모드는 끝까지 간다.
+ * 흐름: 타일 클릭 → (대화가 있으면 자동 채움) → [바로 실행] 또는 [연계에 추가].
+ * 연계 1단계는 보통 턴, 2단계 이상은 숨은 턴 + 종합 1건(실행기는 PageShell).
  */
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { featuresFor, filterFeatures, type Feature } from "@/lib/features/catalog";
@@ -29,30 +26,34 @@ import {
   needsFiles,
   stepBlanks,
   stepReady,
+  suggestValues,
   uploadStepFile,
   type Composition,
   type CompositionStep,
 } from "@/lib/features/composition";
 import type { AppMode } from "@/lib/store/mode";
 
+/** 대화에 나온 서식 인용 — form_find 가 목록으로 보여 준다. */
+export type FormCitation = { id: string; title: string; articleKey: string };
+
 type Props = {
   threadId: string | null;
   mode: AppMode | null;
+  /** 대화에 턴이 있는가 — 있으면 입력을 대화로 채우고, 빈 칸을 막지 않는다. */
+  hasTurns: boolean;
   composition: Composition | null;
   running: boolean;
+  formCitations: FormCitation[];
   onChange: (c: Composition | null) => void;
   onRun: (mode: "stepwise" | "auto") => void;
   /** 기능 하나를 보이는 턴으로 지금 보낸다. */
   onRunNow: (f: Feature, st: CompositionStep) => void;
+  /** 서식 인용 → 작성 모달(PageShell.handleUseAsForm). 미전달 시 목록 비노출 */
+  onUseAsForm?: (articleKey: string, title: string) => void;
   onStop: () => void;
 };
 
-const BLANK: Composition = {
-  steps: [],
-  cursor: 0,
-  mode: "stepwise",
-  status: "draft",
-};
+const BLANK: Composition = { steps: [], cursor: 0, mode: "stepwise", status: "draft" };
 
 const CATEGORY_ICON: Record<string, string> = {
   "규제 경로 분해": "checklist",
@@ -75,115 +76,41 @@ const CATEGORY_ICON: Record<string, string> = {
   "변경 추적": "notifications_active",
 };
 
-/** 단계 하나의 입력 편집기 — 새 단계 구성과 목록 안 편집이 같은 UI 를 쓴다. */
-function StepEditor({
-  f,
-  st,
-  idx,
-  busyFile,
-  canUpload,
-  onPatch,
-  onPickFile,
-  onDropFile,
-}: {
+/** 파일을 붙일 수 있는 기능 — 파일이 핵심이거나 기밀 검토일 때만. 서식 작성에 파일을
+ *  올리라고 하던 것은 지침으로 폐지(2026-10-05). */
+function canAttach(f: Feature): boolean {
+  return f.triggers === "attach" || f.triggers === "confidential";
+}
+
+type Draft = {
   f: Feature;
   st: CompositionStep;
-  idx: number;
-  busyFile: boolean;
-  canUpload: boolean;
-  onPatch: (next: Partial<CompositionStep>) => void;
-  onPickFile: () => void;
-  onDropFile: (fileId: string) => void;
-}) {
-  return (
-    <>
-      {f.form ? (
-        <div className="mt-1.5 flex flex-col gap-1.5">
-          {f.form.fields.map((fd) => (
-            <label key={fd.key} className="flex flex-col gap-0.5">
-              <span className="text-[10.5px] text-md-on-surface-variant">{fd.label}</span>
-              <input
-                value={st.values[fd.key] ?? ""}
-                data-field={`${idx}:${fd.key}`}
-                onChange={(e) =>
-                  onPatch({ values: { ...st.values, [fd.key]: e.target.value } })
-                }
-                placeholder={fd.placeholder}
-                className="w-full rounded-[6px] border border-md-outline-variant bg-md-surface px-2 py-1 text-[12px] outline-none focus:border-md-primary"
-              />
-            </label>
-          ))}
-        </div>
-      ) : null}
-
-      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-        <button
-          type="button"
-          data-add-file={idx}
-          disabled={busyFile || st.files.length >= 3 || !canUpload}
-          onClick={onPickFile}
-          title={canUpload ? undefined : "대화를 먼저 시작해야 파일을 올릴 수 있습니다"}
-          className="rounded-pill border border-md-outline-variant px-2 py-0.5 text-[11px] text-md-on-surface-variant hover:border-md-primary hover:text-md-primary disabled:opacity-40"
-        >
-          파일 추가
-        </button>
-        <label className="inline-flex items-center gap-1 text-[11px] text-md-on-surface-variant">
-          <input
-            type="checkbox"
-            data-confidential={idx}
-            checked={st.confidential}
-            onChange={(e) => onPatch({ confidential: e.target.checked })}
-          />
-          기밀
-        </label>
-        {needsFiles(f) && st.files.length === 0 ? (
-          <span className="text-[11px] text-md-error">파일 필요</span>
-        ) : null}
-      </div>
-
-      {st.files.length ? (
-        <ul className="mt-1 flex flex-wrap gap-1">
-          {st.files.map((fl) => (
-            <li key={fl.id}>
-              <button
-                type="button"
-                onClick={() => onDropFile(fl.id)}
-                title="빼기"
-                className="inline-flex items-center gap-1 rounded-pill bg-md-surface-container px-2 py-0.5 text-[10.5px] text-md-on-surface-variant hover:text-md-error"
-              >
-                {fl.name}
-                <span className="material-symbols-outlined text-[11px]" aria-hidden>
-                  close
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-    </>
-  );
-}
+  /** 목록의 단계를 고치는 중이면 그 index. 없으면 새 단계 */
+  idx?: number;
+  filling: boolean;
+  filled: boolean;
+};
 
 export function CompositionPanel({
   threadId,
   mode,
+  hasTurns,
   composition,
   running,
+  formCitations,
   onChange,
   onRun,
   onRunNow,
+  onUseAsForm,
   onStop,
 }: Props) {
   const c = composition ?? BLANK;
   const [q, setQ] = useState("");
-  /** 타일을 눌러 구성 중인 단계(아직 목록에 없음). */
-  const [draft, setDraft] = useState<{ f: Feature; st: CompositionStep } | null>(null);
-  /** 연계가 있을 때 타일 격자를 접어 둔다 — 목록이 밀려 내려가면 안 된다. */
-  const [gridOpen, setGridOpen] = useState(true);
-  const [busyFile, setBusyFile] = useState<number | null>(null);
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const [moreForms, setMoreForms] = useState(false);
+  const [busyFile, setBusyFile] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
-  // -1 = 구성 중인 초안, 0.. = 목록의 단계
-  const fileTargetRef = useRef<number>(-2);
+  const fillSeq = useRef(0);
 
   // 패널을 여는 기능(brief·watch)은 턴으로 보낼 문장이 없다 — 입력창의 전용
   // 버튼(의견서 초안·관찰 목록)으로 연다. 여기서는 뺀다.
@@ -200,41 +127,77 @@ export function CompositionPanel({
     (next: Partial<Composition>) => onChange({ ...c, ...next }),
     [c, onChange],
   );
-  const patchStep = useCallback(
-    (i: number, next: Partial<CompositionStep>) => {
-      const steps = c.steps.slice();
-      steps[i] = { ...steps[i]!, ...next };
-      patch({ steps });
-    },
-    [c.steps, patch],
-  );
   const patchDraft = (next: Partial<CompositionStep>) =>
     setDraft((d) => (d ? { ...d, st: { ...d.st, ...next } } : d));
 
-  const startDraft = (f: Feature) => setDraft({ f, st: emptyStep(f) });
+  /**
+   * 타일 클릭 → 초안. 대화가 있으면 **대화 내용으로 먼저 채운다**(지침). 제안이 늦게
+   * 와도 사용자가 그새 친 값은 덮지 않는다.
+   */
+  const startDraft = useCallback(
+    (f: Feature, st?: CompositionStep, idx?: number) => {
+      const base = st ?? emptyStep(f);
+      const willFill = !st && hasTurns && !!threadId && !!f.form;
+      setMoreForms(false);
+      setDraft({ f, st: base, idx, filling: willFill, filled: false });
+      if (!willFill || !f.form) return;
+      const seq = ++fillSeq.current;
+      void suggestValues(
+        threadId!, f.title,
+        f.form.fields.map((fd) => ({ key: fd.key, label: fd.label, placeholder: fd.placeholder })),
+      ).then((vals) => {
+        if (seq !== fillSeq.current) return;
+        setDraft((d) => {
+          if (!d || d.f.id !== f.id) return d;
+          const merged = { ...vals, ...Object.fromEntries(
+            Object.entries(d.st.values).filter(([, v]) => (v ?? "").trim()),
+          ) };
+          return { ...d, filling: false, filled: Object.keys(vals).length > 0,
+                   st: { ...d.st, values: merged } };
+        });
+      });
+    },
+    [hasTurns, threadId],
+  );
+
+  const closeDraft = () => { fillSeq.current++; setDraft(null); };
 
   const addDraft = () => {
     if (!draft) return;
-    if (c.steps.length >= 8) {
-      toast.error("연계는 8단계까지입니다.");
-      return;
+    if (draft.idx !== undefined) {
+      const steps = c.steps.slice();
+      steps[draft.idx] = draft.st;
+      patch({ steps });
+    } else {
+      if (c.steps.length >= 8) { toast.error("연계는 8단계까지입니다."); return; }
+      // 끝난 연계(status done, cursor=끝)에 단계를 더하면 **새 연계**다 — 종전엔
+      // cursor 가 그대로 남아 실행기가 "이미 다 돌았다"고 보고 아무것도 보내지 않았다
+      // (2026-10-05 실측: 버튼을 눌러도 턴이 안 나감).
+      const fresh = c.status === "done";
+      patch({
+        steps: fresh ? [draft.st] : [...c.steps, draft.st],
+        cursor: fresh ? 0 : c.cursor,
+        status: fresh ? "draft" : c.status,
+      });
     }
-    patch({ steps: [...c.steps, draft.st] });
-    setDraft(null);
-    setGridOpen(false);
+    closeDraft();
   };
 
   const runDraftNow = () => {
     if (!draft) return;
     onRunNow(draft.f, draft.st);
-    setDraft(null);
+    closeDraft();
   };
 
-  const removeStep = (i: number) =>
+  const removeStep = (i: number) => {
+    const steps = c.steps.filter((_, k) => k !== i);
     patch({
-      steps: c.steps.filter((_, k) => k !== i),
-      cursor: Math.min(c.cursor, Math.max(0, c.steps.length - 2)),
+      steps,
+      cursor: c.status === "done" ? 0 : Math.min(c.cursor, Math.max(0, steps.length - 1)),
+      status: c.status === "done" ? "draft" : c.status,
     });
+    if (draft?.idx === i) closeDraft();
+  };
 
   const move = (i: number, d: -1 | 1) => {
     const j = i + d;
@@ -244,345 +207,329 @@ export function CompositionPanel({
     patch({ steps });
   };
 
-  const pickFile = (target: number) => {
-    if (!threadId) {
-      toast.error("대화를 먼저 시작해 주세요.");
-      return;
-    }
-    fileTargetRef.current = target;
+  const pickFile = () => {
+    if (!threadId) { toast.error("대화를 먼저 시작해 주세요."); return; }
     fileRef.current?.click();
   };
 
   const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = "";
-    const target = fileTargetRef.current;
-    if (!file || !threadId || target < -1) return;
-    setBusyFile(target);
+    if (!file || !threadId || !draft) return;
+    setBusyFile(true);
     try {
       const f = await uploadStepFile(threadId, file);
       const meta = { id: f.id, name: f.name, chars: f.chars };
-      if (target === -1) {
-        setDraft((d) => (d ? { ...d, st: { ...d.st, files: [...d.st.files, meta] } } : d));
-      } else {
-        const st = c.steps[target]!;
-        patchStep(target, { files: [...st.files, meta] });
-      }
+      setDraft((d) => (d ? { ...d, st: { ...d.st, files: [...d.st.files, meta] } } : d));
       if (f.truncated) {
-        toast.warning(`${f.name} 은 일부만 읽었습니다.`, {
-          description: "문서가 길어 앞부분만 사용합니다.",
-        });
+        toast.warning(`${f.name} 은 일부만 읽었습니다.`, { description: "문서가 길어 앞부분만 사용합니다." });
       }
     } catch {
       toast.error("파일을 올리지 못했습니다.");
     } finally {
-      setBusyFile(null);
+      setBusyFile(false);
     }
   };
 
-  const dropFile = async (target: number, fileId: string) => {
-    if (target === -1) {
-      setDraft((d) => (d ? { ...d, st: { ...d.st, files: d.st.files.filter((x) => x.id !== fileId) } } : d));
-    } else {
-      const st = c.steps[target]!;
-      patchStep(target, { files: st.files.filter((x) => x.id !== fileId) });
-    }
+  const dropFile = async (fileId: string) => {
+    setDraft((d) => (d ? { ...d, st: { ...d.st, files: d.st.files.filter((x) => x.id !== fileId) } } : d));
     if (!threadId) return;
-    try {
-      await deleteStepFile(threadId, fileId);
-    } catch {
-      /* 목록에서만 빠져도 실행은 막힌다 — 서버 정리는 best-effort */
-    }
+    try { await deleteStepFile(threadId, fileId); } catch { /* best-effort */ }
   };
 
-  // 실행 가능 판정 — 파일은 모든 단계, 빈 칸은 **지금 돌 단계**만 본다. 뒤 단계의
-  // 빈 칸은 앞 단계 결과로 채워지므로 미리 막으면 연계를 못 시작한다.
+  // 실행 가능 — 파일은 모든 단계가 갖춰야 하고, 빈 칸은 **대화도 앞 단계도 없는 첫
+  // 단계**만 막는다. 그 외 빈 칸은 앞 단계·앞 대화 결과를 가리키는 말로 치환돼 나간다.
   const cursor = Math.min(c.cursor, Math.max(0, c.steps.length - 1));
   const blocked = c.steps.findIndex((st, i) => {
     const f = byId.get(st.fn);
     if (!stepReady(f, st)) return true;
-    return i === cursor && !!f && stepBlanks(f, st);
+    return i === cursor && cursor === 0 && !hasTurns && !!f && stepBlanks(f, st);
   });
   const canRun = c.steps.length > 0 && blocked < 0 && !!threadId;
   const draftBlank = draft ? stepBlanks(draft.f, draft.st) : false;
-  const draftReady = draft ? stepReady(draft.f, draft.st) && !draftBlank : false;
+  const draftFilesOk = draft ? stepReady(draft.f, draft.st) : false;
+  const draftRunnable = !!draft && draftFilesOk && (!draftBlank || hasTurns) && !!threadId;
+
+  // Esc 로 초안 닫기
+  useEffect(() => {
+    if (!draft) return;
+    const h = (e: KeyboardEvent) => { if (e.key === "Escape") closeDraft(); };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [!!draft]);
+
+  const isFormFind = draft?.f.id === "form_find";
+  const showFormList = isFormFind && !!onUseAsForm && formCitations.length > 0;
 
   return (
     <section data-testid="composition-panel" className="flex h-full min-h-0 flex-col">
-      <input
-        ref={fileRef}
-        type="file"
-        accept=".pdf,.docx,.hwpx,.txt"
-        onChange={(e) => void onFile(e)}
-        className="hidden"
-      />
+      <input ref={fileRef} type="file" accept=".pdf,.docx,.hwpx,.txt"
+             onChange={(e) => void onFile(e)} className="hidden" />
 
-      {/* ── 구성 중인 단계 — 타일을 눌렀을 때 ── */}
-      {draft ? (
-        <div className="flex min-h-0 flex-1 flex-col">
-          <div className="flex items-center gap-2 border-b border-md-outline-variant px-3 py-2">
-            <button
-              type="button"
-              onClick={() => setDraft(null)}
-              aria-label="뒤로"
-              className="material-symbols-outlined text-[18px] text-md-on-surface-variant hover:text-md-primary"
-            >
-              arrow_back
-            </button>
-            <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold text-md-on-surface">
-              {draft.f.title}
+      {/* ───────── 위 2/3 — 찾기 + 타일(1열) ───────── */}
+      <div className="flex min-h-0 flex-[2] flex-col">
+        <div className="px-2.5 pt-2">
+          <div className="relative">
+            <span className="material-symbols-outlined pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-[15px] text-md-on-surface-variant" aria-hidden>
+              search
             </span>
-          </div>
-          <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2" data-testid="composition-draft">
-            <p className="text-[11.5px] leading-snug text-md-on-surface-variant">
-              {draft.f.form?.intro ?? draft.f.subtitle}
-            </p>
-            {draft.f.expects.length ? (
-              <ul className="mt-1.5 flex flex-col gap-0.5">
-                {draft.f.expects.map((e) => (
-                  <li key={e} className="flex gap-1 text-[11px] text-md-on-surface-variant">
-                    <span className="material-symbols-outlined mt-[1px] text-[12px] text-md-primary" aria-hidden>
-                      check
-                    </span>
-                    <span>{e}</span>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-            <StepEditor
-              f={draft.f}
-              st={draft.st}
-              idx={-1}
-              busyFile={busyFile === -1}
-              canUpload={!!threadId}
-              onPatch={patchDraft}
-              onPickFile={() => pickFile(-1)}
-              onDropFile={(id) => void dropFile(-1, id)}
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="기능 찾기"
+              data-testid="composition-search"
+              className="w-full rounded-[8px] border border-md-outline-variant bg-md-surface-container-lowest py-1.5 pl-7 pr-2 text-[12px] outline-none focus:border-md-primary"
             />
-            {draftBlank ? (
-              <p className="mt-2 text-[11px] text-md-on-surface-variant">
-                빈 칸을 채우면 바로 실행할 수 있습니다. 연계에 넣으면 앞 단계 결과로 채울 수 있습니다.
-              </p>
-            ) : null}
-          </div>
-          <div className="flex gap-1.5 border-t border-md-outline-variant px-3 py-2.5">
-            <button
-              type="button"
-              data-testid="composition-run-now"
-              disabled={!draftReady || running}
-              onClick={runDraftNow}
-              className="flex-1 rounded-pill bg-md-primary px-3 py-1.5 text-[12px] font-semibold text-md-on-primary disabled:opacity-40"
-            >
-              바로 실행
-            </button>
-            <button
-              type="button"
-              data-testid="composition-add"
-              disabled={!stepReady(draft.f, draft.st) && needsFiles(draft.f)}
-              onClick={addDraft}
-              className="flex-1 rounded-pill border border-md-primary px-3 py-1.5 text-[12px] font-semibold text-md-primary disabled:opacity-40"
-            >
-              연계에 추가
-            </button>
           </div>
         </div>
-      ) : (
-        <>
-          {/* ── 타일 + 검색 ── */}
-          <div className="border-b border-md-outline-variant px-3 py-2">
-            <div className="flex items-center gap-2">
-              <span className="text-label-caps text-md-on-surface-variant">기능연계</span>
-              {c.steps.length ? (
+        <ul className="mt-1.5 min-h-0 flex-1 overflow-y-auto px-2.5 pb-2" data-testid="composition-grid">
+          {shown.length ? shown.map((f) => {
+            const active = draft?.f.id === f.id && draft.idx === undefined;
+            return (
+              <li key={f.id} className="mb-1">
                 <button
                   type="button"
-                  data-testid="composition-grid-toggle"
-                  onClick={() => setGridOpen((v) => !v)}
-                  className="ml-auto rounded-pill border border-md-outline-variant px-2.5 py-0.5 text-[11.5px] text-md-on-surface-variant hover:border-md-primary hover:text-md-primary"
+                  data-add-feature={f.id}
+                  aria-pressed={active}
+                  onClick={() => startDraft(f)}
+                  title={f.expects.join("\n")}
+                  className={
+                    "flex w-full items-start gap-2 rounded-[8px] border p-2 text-left transition-colors " +
+                    (active
+                      ? "border-md-primary bg-md-primary-container/40"
+                      : "border-md-outline-variant bg-md-surface-container-lowest hover:border-md-primary hover:bg-md-surface-container-low")
+                  }
                 >
-                  {gridOpen ? "목록 접기" : "기능 추가"}
+                  <span className="material-symbols-outlined mt-[1px] text-[16px] text-md-primary" aria-hidden>
+                    {CATEGORY_ICON[f.category] ?? "bolt"}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[12px] font-semibold leading-snug text-md-on-surface">
+                      {f.title}
+                    </span>
+                    <span className="block truncate text-[10.5px] leading-snug text-md-on-surface-variant">
+                      {f.subtitle}
+                    </span>
+                  </span>
                 </button>
-              ) : null}
-            </div>
-            {gridOpen || !c.steps.length ? (
-              <div className="relative mt-2">
-                <span
-                  className="material-symbols-outlined pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-[15px] text-md-on-surface-variant"
-                  aria-hidden
-                >
-                  search
-                </span>
-                <input
-                  value={q}
-                  onChange={(e) => setQ(e.target.value)}
-                  placeholder="기능 찾기 (이름 · 설명 · 분류)"
-                  data-testid="composition-search"
-                  className="w-full rounded-[8px] border border-md-outline-variant bg-md-surface-container-lowest py-1.5 pl-7 pr-2.5 text-[12px] outline-none focus:border-md-primary"
-                />
-              </div>
-            ) : null}
-          </div>
+              </li>
+            );
+          }) : (
+            <li className="px-1 py-4 text-center text-[12px] text-md-on-surface-variant">
+              해당하는 기능이 없습니다.
+            </li>
+          )}
+        </ul>
+      </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2">
-            {gridOpen || !c.steps.length ? (
-              shown.length ? (
-                <ul className="mb-3 grid grid-cols-2 gap-1.5" data-testid="composition-grid">
-                  {shown.map((f) => (
-                    <li key={f.id}>
-                      <button
-                        type="button"
-                        data-add-feature={f.id}
-                        onClick={() => startDraft(f)}
-                        title={f.expects.join("\n")}
-                        className="flex h-full w-full flex-col gap-0.5 rounded-[8px] border border-md-outline-variant bg-md-surface-container-lowest p-2 text-left transition-colors hover:border-md-primary hover:bg-md-surface-container-low"
-                      >
-                        <span className="flex items-center gap-1 text-[10px] text-md-on-surface-variant">
-                          <span className="material-symbols-outlined text-[13px] text-md-primary" aria-hidden>
-                            {CATEGORY_ICON[f.category] ?? "bolt"}
-                          </span>
-                          <span className="truncate">{f.category}</span>
-                        </span>
-                        <span className="text-[12px] font-semibold leading-snug text-md-on-surface">
-                          {f.title}
-                        </span>
+      {/* ───────── 아래 1/3 — 고른 기능의 입력 / 연계 목록 ───────── */}
+      <div className="flex min-h-0 flex-1 flex-col border-t border-md-outline-variant bg-md-surface-container-low/40">
+        {draft ? (
+          <>
+            <div className="flex items-center gap-1.5 px-2.5 pt-2">
+              <span className="min-w-0 flex-1 truncate text-[12px] font-semibold text-md-on-surface">
+                {draft.idx !== undefined ? `${draft.idx + 1}단계 · ` : ""}{draft.f.title}
+              </span>
+              {draft.filling ? (
+                <span className="text-[10.5px] text-md-on-surface-variant">대화에서 채우는 중…</span>
+              ) : draft.filled ? (
+                <span className="text-[10.5px] text-md-primary" data-testid="composition-filled">대화 내용으로 채움</span>
+              ) : null}
+              <button type="button" onClick={closeDraft} aria-label="닫기"
+                      className="material-symbols-outlined text-[16px] text-md-on-surface-variant hover:text-md-primary">
+                close
+              </button>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto px-2.5 py-1.5" data-testid="composition-draft">
+              {showFormList ? (
+                <>
+                  <p className="text-[11px] text-md-on-surface-variant">대화에 나온 서식 — 골라서 바로 작성합니다.</p>
+                  <ul className="mt-1 flex flex-col gap-1" data-testid="composition-form-list">
+                    {formCitations.map((fc) => (
+                      <li key={fc.id}>
+                        <button
+                          type="button"
+                          data-form-citation={fc.articleKey}
+                          onClick={() => { onUseAsForm!(fc.articleKey, fc.title); closeDraft(); }}
+                          className="flex w-full items-center gap-1.5 rounded-[8px] border border-md-outline-variant bg-md-surface-container-lowest px-2 py-1.5 text-left hover:border-md-primary"
+                        >
+                          <span className="material-symbols-outlined text-[14px] text-md-primary" aria-hidden>description</span>
+                          <span className="min-w-0 flex-1 truncate text-[11.5px] text-md-on-surface">{fc.title}</span>
+                          <span className="shrink-0 text-[10.5px] font-medium text-md-primary">작성</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                  <button type="button" onClick={() => setMoreForms((v) => !v)}
+                          className="mt-1.5 text-[11px] text-md-on-surface-variant underline underline-offset-2 hover:text-md-primary">
+                    {moreForms ? "접기" : "다른 서식 찾기"}
+                  </button>
+                </>
+              ) : null}
+
+              {(!showFormList || moreForms) && draft.f.form ? (
+                <div className={"flex flex-col gap-1.5 " + (showFormList ? "mt-1.5" : "")}>
+                  {!showFormList && draft.f.form.intro ? (
+                    <p className="text-[11px] leading-snug text-md-on-surface-variant">{draft.f.form.intro}</p>
+                  ) : null}
+                  {draft.f.form.fields.map((fd) => (
+                    <label key={fd.key} className="flex flex-col gap-0.5">
+                      <span className="text-[10.5px] text-md-on-surface-variant">{fd.label}</span>
+                      <input
+                        value={draft.st.values[fd.key] ?? ""}
+                        data-field={fd.key}
+                        onChange={(e) => patchDraft({ values: { ...draft.st.values, [fd.key]: e.target.value } })}
+                        placeholder={fd.placeholder}
+                        className="w-full rounded-[6px] border border-md-outline-variant bg-md-surface px-2 py-1 text-[12px] outline-none focus:border-md-primary"
+                      />
+                    </label>
+                  ))}
+                </div>
+              ) : null}
+              {!draft.f.form && !showFormList ? (
+                <p className="text-[11px] leading-snug text-md-on-surface-variant">{draft.f.subtitle}</p>
+              ) : null}
+
+              <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                {canAttach(draft.f) ? (
+                  <button type="button" data-add-file disabled={busyFile || draft.st.files.length >= 3 || !threadId}
+                          onClick={pickFile}
+                          className="rounded-pill border border-md-outline-variant px-2 py-0.5 text-[11px] text-md-on-surface-variant hover:border-md-primary hover:text-md-primary disabled:opacity-40">
+                    파일 추가
+                  </button>
+                ) : null}
+                <label className="inline-flex items-center gap-1 text-[11px] text-md-on-surface-variant">
+                  <input type="checkbox" data-confidential checked={draft.st.confidential}
+                         onChange={(e) => patchDraft({ confidential: e.target.checked })} />
+                  기밀
+                </label>
+                {needsFiles(draft.f) && draft.st.files.length === 0 ? (
+                  <span className="text-[11px] text-md-error">파일 필요</span>
+                ) : null}
+              </div>
+              {draft.st.files.length ? (
+                <ul className="mt-1 flex flex-wrap gap-1">
+                  {draft.st.files.map((fl) => (
+                    <li key={fl.id}>
+                      <button type="button" onClick={() => void dropFile(fl.id)} title="빼기"
+                              className="inline-flex items-center gap-1 rounded-pill bg-md-surface-container px-2 py-0.5 text-[10.5px] text-md-on-surface-variant hover:text-md-error">
+                        {fl.name}<span className="material-symbols-outlined text-[11px]" aria-hidden>close</span>
                       </button>
                     </li>
                   ))}
                 </ul>
-              ) : (
-                <p className="mb-3 px-1 py-4 text-center text-[12px] text-md-on-surface-variant">
-                  해당하는 기능이 없습니다.
+              ) : null}
+              {draftBlank && !hasTurns && !showFormList ? (
+                <p className="mt-1.5 text-[11px] text-md-on-surface-variant">
+                  빈 칸을 채우면 실행할 수 있습니다. 연계 2단계부터는 앞 단계 결과로 채워집니다.
                 </p>
-              )
+              ) : null}
+            </div>
+
+            {!showFormList || moreForms ? (
+              <div className="flex gap-1.5 px-2.5 pb-2 pt-1">
+                {draft.idx !== undefined ? (
+                  <>
+                    <button type="button" data-testid="composition-save" onClick={addDraft}
+                            className="flex-1 rounded-pill bg-md-primary px-3 py-1.5 text-[12px] font-semibold text-md-on-primary">
+                      저장
+                    </button>
+                    <button type="button" onClick={() => removeStep(draft.idx!)}
+                            className="rounded-pill border border-md-outline-variant px-3 py-1.5 text-[12px] text-md-on-surface-variant hover:border-md-error hover:text-md-error">
+                      빼기
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button type="button" data-testid="composition-run-now" disabled={!draftRunnable || running}
+                            onClick={runDraftNow}
+                            className="flex-1 rounded-pill bg-md-primary px-3 py-1.5 text-[12px] font-semibold text-md-on-primary disabled:opacity-40">
+                      바로 실행
+                    </button>
+                    <button type="button" data-testid="composition-add"
+                            disabled={needsFiles(draft.f) && draft.st.files.length === 0}
+                            onClick={addDraft}
+                            className="flex-1 rounded-pill border border-md-primary px-3 py-1.5 text-[12px] font-semibold text-md-primary disabled:opacity-40">
+                      연계에 추가
+                    </button>
+                  </>
+                )}
+              </div>
             ) : null}
-
-            {c.steps.length === 0 ? (
-              <p className="px-1 pb-2 text-center text-[11.5px] leading-relaxed text-md-on-surface-variant">
-                기능을 골라 바로 실행하거나, 여러 기능을 연계해 순서대로 돌릴 수 있습니다.
-              </p>
-            ) : (
-              <>
-                <div className="mb-1.5 flex items-center gap-2">
-                  <span className="text-[11px] font-semibold text-md-on-surface-variant">
-                    연계 {Math.min(c.cursor, c.steps.length)}/{c.steps.length}
-                  </span>
-                  <button
-                    type="button"
-                    data-testid="composition-clear"
-                    onClick={() => onChange(null)}
-                    className="ml-auto text-[11px] text-md-on-surface-variant underline underline-offset-2 hover:text-md-error"
-                  >
-                    비우기
-                  </button>
-                </div>
-                <ol className="flex flex-col gap-2">
-                  {c.steps.map((st, i) => {
-                    const f = byId.get(st.fn);
-                    const done = i < c.cursor;
-                    const ready = stepReady(f, st);
-                    return (
-                      <li
-                        key={`${st.fn}-${i}`}
-                        data-step={st.fn}
-                        data-state={done ? "done" : i === c.cursor ? "now" : "todo"}
-                        className={
-                          "rounded-[10px] border p-2.5 " +
-                          (done
-                            ? "border-md-outline-variant/60 bg-md-surface-container-lowest opacity-70"
-                            : "border-md-outline-variant bg-md-surface-container-lowest")
-                        }
-                      >
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-[11px] font-bold text-md-primary">
-                            {done ? "✓" : i + 1}
-                          </span>
-                          <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold text-md-on-surface">
-                            {f ? f.title : `(없는 기능: ${st.fn})`}
-                          </span>
-                          <button type="button" title="위로" onClick={() => move(i, -1)}
-                            className="text-[11px] text-md-on-surface-variant hover:text-md-primary">↑</button>
-                          <button type="button" title="아래로" onClick={() => move(i, 1)}
-                            className="text-[11px] text-md-on-surface-variant hover:text-md-primary">↓</button>
-                          <button type="button" title="빼기" data-remove-step={i}
-                            onClick={() => removeStep(i)}
-                            className="text-[11px] text-md-on-surface-variant hover:text-md-error">✕</button>
-                        </div>
-                        {f ? (
-                          <StepEditor
-                            f={f}
-                            st={st}
-                            idx={i}
-                            busyFile={busyFile === i}
-                            canUpload={!!threadId}
-                            onPatch={(next) => patchStep(i, next)}
-                            onPickFile={() => pickFile(i)}
-                            onDropFile={(id) => void dropFile(i, id)}
-                          />
-                        ) : null}
-                        {!ready && f ? (
-                          <p className="mt-1 text-[11px] text-md-on-surface-variant">
-                            파일을 올려야 이 단계를 실행할 수 있습니다.
-                          </p>
-                        ) : null}
-                      </li>
-                    );
-                  })}
-                </ol>
-              </>
-            )}
-          </div>
-
-          {c.steps.length ? (
-            <div className="border-t border-md-outline-variant px-3 py-2.5">
+          </>
+        ) : c.steps.length === 0 ? (
+          <p className="px-3 py-4 text-center text-[11.5px] leading-relaxed text-md-on-surface-variant">
+            기능을 고르면 여기에 입력이 열립니다.<br />
+            {hasTurns ? "대화 내용으로 먼저 채워 드립니다." : "여러 기능을 연계하면 순서대로 돌립니다."}
+          </p>
+        ) : (
+          <>
+            <div className="flex items-center gap-2 px-2.5 pt-2">
+              <span className="text-[11px] font-semibold text-md-on-surface-variant">
+                연계 {Math.min(c.cursor, c.steps.length)}/{c.steps.length}
+              </span>
+              <button type="button" data-testid="composition-clear" onClick={() => onChange(null)}
+                      className="ml-auto text-[11px] text-md-on-surface-variant underline underline-offset-2 hover:text-md-error">
+                비우기
+              </button>
+            </div>
+            <ol className="min-h-0 flex-1 overflow-y-auto px-2.5 py-1.5">
+              {c.steps.map((st, i) => {
+                const f = byId.get(st.fn);
+                const done = i < c.cursor;
+                const ready = stepReady(f, st);
+                return (
+                  <li key={`${st.fn}-${i}`} data-step={st.fn}
+                      data-state={done ? "done" : i === c.cursor ? "now" : "todo"}
+                      className={"mb-1 flex items-center gap-1.5 rounded-[8px] border px-2 py-1.5 " +
+                        (done ? "border-md-outline-variant/60 opacity-60" : "border-md-outline-variant bg-md-surface-container-lowest")}>
+                    <span className="w-3 text-[11px] font-bold text-md-primary">{done ? "✓" : i + 1}</span>
+                    <button type="button" onClick={() => f && startDraft(f, st, i)} disabled={!f}
+                            className="min-w-0 flex-1 truncate text-left text-[11.5px] text-md-on-surface hover:text-md-primary">
+                      {f ? f.title : `(없는 기능: ${st.fn})`}
+                      {!ready && f ? <span className="ml-1 text-[10px] text-md-error">파일 필요</span> : null}
+                    </button>
+                    <button type="button" title="위로" onClick={() => move(i, -1)} className="text-[11px] text-md-on-surface-variant hover:text-md-primary">↑</button>
+                    <button type="button" title="아래로" onClick={() => move(i, 1)} className="text-[11px] text-md-on-surface-variant hover:text-md-primary">↓</button>
+                    <button type="button" title="빼기" data-remove-step={i} onClick={() => removeStep(i)} className="text-[11px] text-md-on-surface-variant hover:text-md-error">✕</button>
+                  </li>
+                );
+              })}
+            </ol>
+            <div className="px-2.5 pb-2">
               {running ? (
-                <button
-                  type="button"
-                  data-testid="composition-stop"
-                  onClick={onStop}
-                  className="w-full rounded-pill border border-md-error px-3 py-1.5 text-[12px] font-semibold text-md-error"
-                >
+                <button type="button" data-testid="composition-stop" onClick={onStop}
+                        className="w-full rounded-pill border border-md-error px-3 py-1.5 text-[12px] font-semibold text-md-error">
                   중단
                 </button>
+              ) : c.status === "done" ? (
+                <button type="button" data-testid="composition-run-auto" disabled={!canRun} onClick={() => onRun("auto")}
+                        className="w-full rounded-pill border border-md-primary px-3 py-1.5 text-[12px] font-semibold text-md-primary disabled:opacity-40">
+                  다시 실행
+                </button>
               ) : c.steps.length === 1 ? (
-                <button
-                  type="button"
-                  data-testid="composition-run-auto"
-                  disabled={!canRun}
-                  onClick={() => onRun("auto")}
-                  className="w-full rounded-pill bg-md-primary px-3 py-1.5 text-[12px] font-semibold text-md-on-primary disabled:opacity-40"
-                >
+                <button type="button" data-testid="composition-run-auto" disabled={!canRun} onClick={() => onRun("auto")}
+                        className="w-full rounded-pill bg-md-primary px-3 py-1.5 text-[12px] font-semibold text-md-on-primary disabled:opacity-40">
                   실행
                 </button>
               ) : (
                 <div className="flex gap-1.5">
-                  <button
-                    type="button"
-                    data-testid="composition-run-stepwise"
-                    disabled={!canRun}
-                    onClick={() => onRun("stepwise")}
-                    className="flex-1 rounded-pill border border-md-primary px-3 py-1.5 text-[12px] font-semibold text-md-primary disabled:opacity-40"
-                  >
-                    단계별 실행
+                  <button type="button" data-testid="composition-run-stepwise" disabled={!canRun} onClick={() => onRun("stepwise")}
+                          className="flex-1 rounded-pill border border-md-primary px-3 py-1.5 text-[12px] font-semibold text-md-primary disabled:opacity-40">
+                    단계별
                   </button>
-                  <button
-                    type="button"
-                    data-testid="composition-run-auto"
-                    disabled={!canRun}
-                    onClick={() => onRun("auto")}
-                    className="flex-1 rounded-pill bg-md-primary px-3 py-1.5 text-[12px] font-semibold text-md-on-primary disabled:opacity-40"
-                  >
-                    한번에 실행
+                  <button type="button" data-testid="composition-run-auto" disabled={!canRun} onClick={() => onRun("auto")}
+                          className="flex-1 rounded-pill bg-md-primary px-3 py-1.5 text-[12px] font-semibold text-md-on-primary disabled:opacity-40">
+                    한번에
                   </button>
                 </div>
               )}
-              <p className="mt-1.5 text-[11px] leading-snug text-md-on-surface-variant">
-                {c.steps.length === 1
-                  ? "한 단계는 보통 질문처럼 바로 답합니다."
-                  : "중간 결과는 채팅에 쌓지 않습니다 — 마지막에 한 번 종합해 보여 드립니다."}
-              </p>
             </div>
-          ) : null}
-        </>
-      )}
+          </>
+        )}
+      </div>
     </section>
   );
 }

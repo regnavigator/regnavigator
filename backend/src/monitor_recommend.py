@@ -123,9 +123,12 @@ async def recommend(
     if isinstance(content, list):
         content = "".join(b.get("text", "") for b in content if isinstance(b, dict))
     text = str(content or "")
-    # 프리필을 쓰면 응답이 `{` 없이 이어진다 — 앞을 되돌려 붙인다.
-    if model is None and not text.lstrip().startswith("{"):
-        text = _PREFILL + text
+    # 프리필을 쓰면 응답이 그 뒤부터 이어진다 — 앞을 되돌려 붙인다(`workflow.join_prefill`
+    # 의 교훈: `{` 로 시작한다고 완전한 JSON 이 아니다).
+    if model is None:
+        from src.workflow import join_prefill
+
+        text = join_prefill(_PREFILL, text)
     data = _parse(text)
     if not data:
         _log.info("관찰 추천 — JSON 파싱 실패(응답 %d자)", len(text))

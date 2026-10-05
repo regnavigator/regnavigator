@@ -130,19 +130,29 @@ export function stepMessage(
   f: Feature,
   st: CompositionStep,
   index: number,
+  opts?: { fromConversation?: boolean },
 ): string {
   const lead =
     index > 0
       ? "앞 단계에서 정리한 내용과 근거를 그대로 이어받아서 진행해줘.\n\n"
-      : "";
+      : opts?.fromConversation
+        ? "지금까지의 대화 내용과 근거를 그대로 이어받아서 진행해줘.\n\n"
+        : "";
   if (f.form) {
     const cleaned: Record<string, string> = {};
     for (const [k, v] of Object.entries(st.values)) cleaned[k] = (v ?? "").trim();
     const body = f.form.build(cleaned);
-    // 2단계부터 남은 빈 칸은 앞 단계 결과를 가리키게 바꾼다(2026-10-05 실측 정정).
-    // `___(대상)` 그대로 보내면 모델이 "란이 비어 있습니다"로 멈춘다 — 입력 제안이
-    // 비었을 때(앞 단계가 검색 실패 등으로 빈약할 때) 실제로 그랬다.
-    return lead + (index > 0 ? body.replace(/___\(([^)]*)\)/g, "(앞 단계에서 정리한 $1)") : body);
+    // 남은 빈 칸은 앞 단계(2단계부터) 또는 앞 대화(대화 중 첫 단계)의 결과를 가리키게
+    // 바꾼다(2026-10-05 실측 정정). `___(대상)` 그대로 보내면 모델이 "란이 비어
+    // 있습니다"로 멈춘다. 연계는 앞 결과가 다음 입력이므로 따로 적지 않아도 이어진다.
+    const ref = index > 0 ? "앞 단계" : opts?.fromConversation ? "앞 대화" : null;
+    // 힌트가 "쟁점을 적어 주세요" 같은 문장이면 명사만 남긴다 — 그대로 치환하면
+    // "(앞 대화에서 정리한 쟁점을 적어 주세요)" 가 된다(2026-10-05 실측).
+    const noun = (h: string) =>
+      h.replace(/[을를은는이가]?\s*(적어|붙여 넣어|입력해|써)\s*주세요\.?$/u, "").trim() || h;
+    return lead + (ref
+      ? body.replace(/___\(([^)]*)\)/g, (_m, h: string) => `(${ref}에서 정리한 ${noun(h)})`)
+      : body);
   }
   return lead + f.title;
 }

@@ -17,7 +17,7 @@
 
 import { toast } from "sonner";
 import { cancelReportRun } from "@/lib/client/reports";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { ChatState, Citation } from "@/lib/store/types";
 import { CitationInspector } from "@/components/panel/CitationInspector";
 import { ArtifactViewer } from "@/components/panel/ArtifactViewer";
@@ -39,9 +39,6 @@ type Props = {
     add: (c: Citation) => void;
     remove: (articleKey: string) => void;
   };
-  /** 조합 탭 내용(2026-10-02) — PageShell 이 `CompositionPanel` 을 꽂는다.
-   *  패널이 조합 상태를 알 필요는 없고, 자리만 내준다. */
-  composerSlot?: ReactNode;
 };
 
 function hasDoneReports(state: ChatState): boolean {
@@ -375,12 +372,8 @@ export function RightPanel({
   reportProgress,
   onUseAsForm,
   watch,
-  composerSlot,
 }: Props) {
-  const { citation, docPath, composer, setComposer } = useRightPanel();
-  // 조합 탭 — 기본은 조합이 켜진 순간 조합을 보여 준다. 근거를 보려고 탭을
-  // 옮기면 그 선택을 유지한다(조합을 짜면서 근거를 확인하는 흐름이 자연스럽다).
-  const [tab, setTab] = useState<"composer" | "context">("composer");
+  const { citation, docPath } = useRightPanel();
 
   const hasReports = hasDoneReports(state);
   // 재설계(2026-07-24): reportRunning 단일 진실원 — done 0개여도 진행 중이면 패널 유지.
@@ -418,68 +411,7 @@ export function RightPanel({
   // 노출 자체 결정 — citation/artifact/문서/reports(완료 or 진행 중) 중 하나라도.
   // 문서는 패널을 강제하지 않는다 — 진입 카드는 reports 섹션에 얹혀 갈 뿐.
   const anyContent = hasCitation || hasDocPath || showReports;
-  if (!anyContent && !composer) return null;
-
-  // 조합 탭(2026-10-02) — 기존 근거·보고서 구조는 건드리지 않고 위에 탭만 얹는다.
-  if (composer) {
-    const showComposer = tab === "composer" || !anyContent;
-    return (
-      <aside
-        aria-label="기능연계"
-        className="flex h-full w-full min-w-0 flex-col bg-md-surface-container-lowest"
-      >
-        <div className="flex items-center gap-1 border-b border-md-outline-variant px-2 py-1.5">
-          <button
-            type="button"
-            data-testid="panel-tab-composer"
-            onClick={() => setTab("composer")}
-            aria-pressed={showComposer}
-            className={
-              "rounded-pill px-2.5 py-0.5 text-[11.5px] transition-colors " +
-              (showComposer
-                ? "bg-md-primary-container text-md-on-primary-container"
-                : "text-md-on-surface-variant hover:text-md-primary")
-            }
-          >
-            기능연계
-          </button>
-          <button
-            type="button"
-            data-testid="panel-tab-context"
-            disabled={!anyContent}
-            onClick={() => setTab("context")}
-            aria-pressed={!showComposer}
-            className={
-              "rounded-pill px-2.5 py-0.5 text-[11.5px] transition-colors disabled:opacity-40 " +
-              (!showComposer
-                ? "bg-md-primary-container text-md-on-primary-container"
-                : "text-md-on-surface-variant hover:text-md-primary")
-            }
-          >
-            근거 · 보고서
-          </button>
-          <button
-            type="button"
-            onClick={() => setComposer(false)}
-            title="기능연계 패널 닫기"
-            className="ml-auto text-[11px] text-md-on-surface-variant hover:text-md-primary"
-          >
-            <span className="material-symbols-outlined text-[15px]" aria-hidden>
-              close
-            </span>
-          </button>
-        </div>
-        <div className="min-h-0 flex-1 overflow-hidden">
-          {showComposer ? composerSlot : (ctxPanel ?? <ReportsView
-            state={state}
-            reportRunning={reportRunning}
-            reportQueueAhead={reportQueueAhead}
-            reportProgress={reportProgress}
-          />)}
-        </div>
-      </aside>
-    );
-  }
+  if (!anyContent) return null;
 
   // 컨텍스트(citation/artifact 클릭) 없음 → 이 분기 도달 = hasReports 참
   //   (anyContent 상 필연). **보고서 목록을 패널 전체로 노출.**
@@ -560,10 +492,9 @@ export function useRightPanelMode(
   isRunning?: boolean,
   reportRunning?: boolean,
 ): "artifact" | "side" | null {
-  const { citation, docPath, composer } = useRightPanel();
-  // 조합 탭이 켜져 있으면 패널은 무조건 뜬다(2026-10-02) — 인용·보고서가 없어도
-  // 조합을 짜야 하므로. artifact(전폭) 로는 가지 않는다: 조합은 탭 중 하나다.
-  if (composer) return "side";
+  const { citation, docPath } = useRightPanel();
+  // 기능연계는 이제 **별도 패널**(2026-10-05) — 근거 패널과 동시에 열린다. 여기서
+  // 판정하지 않는다(PageShell 이 `composer` 로 따로 마운트).
   if (!state) {
     if (docPath && !citation) return "artifact";
     if (citation || docPath) return "side";
