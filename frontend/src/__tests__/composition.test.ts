@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { featuresFor } from "@/lib/features/catalog";
+import { briefKindOf, featuresFor, STAGES } from "@/lib/features/catalog";
+import { PRESET_TASKS } from "@/lib/features/presetTasks";
 import {
   emptyStep, fromTemplate, stepBlanks, stepMessage, toTemplateSteps, type Composition,
 } from "@/lib/features/composition";
@@ -78,25 +79,22 @@ describe("연계 공백 판정 findGaps", () => {
   const steps = (...ids: string[]) => ids.map((id) => emptyStep(byId.get(id)!));
   const none = { hasTurns: false, hasFormCitations: false, hasAttachments: false };
 
-  it("사건 검토 → 의견서: 판례가 빠졌다", () => {
-    const gaps = findGaps(steps("case_issues", "brief"), byId, none, all);
+  it("사실관계 → 법리 검토: 쟁점이 빠졌다 (사건 검토·상대 주장 분석이 후보)", () => {
+    const gaps = findGaps(steps("facts_timeline", "legal_memo"), byId, none, all);
+    expect(gaps.map((g) => [g.at, g.slot])).toEqual([[1, "article"]]);
+  });
+  it("사실관계 → 판례 비교: 판례가 빠졌다", () => {
+    const gaps = findGaps(steps("facts_timeline", "precedent_compare"), byId, none, all);
     expect(gaps.map((g) => [g.at, g.slot])).toEqual([[1, "precedent"]]);
     expect(gaps[0]!.candidates.map((c) => c.id)).toContain("prec_issues");
   });
-  it("사건 검토 → 판례 → 의견서: 공백 없음", () => {
-    expect(findGaps(steps("case_issues", "prec_issues", "brief"), byId, none, all)).toEqual([]);
+  it("사건 검토 → 판례 → 법리 검토: 공백 없음", () => {
+    expect(findGaps(steps("case_issues", "prec_issues", "legal_memo"), byId, none, all)).toEqual([]);
   });
   it("채울 기능이 없는 슬롯(subject 는 사용자 입력)은 제안하지 않는다", () => {
-    // form_find 는 subject 가 필요하지만 subject 를 '내는' 기능은 없다 — 끼울 단계가
-    // 없는 공백은 제안이 아니라 폼 빈 칸이다. 대화가 있어도 결과는 같다.
     const s = steps("prec_issues", "form_find");
     expect(findGaps(s, byId, none, all)).toEqual([]);
     expect(findGaps(s, byId, { ...none, hasTurns: true }, all)).toEqual([]);
-  });
-  it("첨부가 있으면 doc 공백이 아니다", () => {
-    const s = steps("prec_issues", "rule_gap");
-    expect(findGaps(s, byId, none, all).map((g) => g.slot)).toEqual([]); // doc 을 내는 기능도 없다
-    expect(findGaps(s, byId, { ...none, hasAttachments: true }, all)).toEqual([]);
   });
   it("첫 단계의 빈 입력은 공백으로 보지 않는다 (폼에 직접 적는다)", () => {
     expect(findGaps(steps("prec_issues", "sanction_level"), byId, none, all)
@@ -104,5 +102,67 @@ describe("연계 공백 판정 findGaps", () => {
   });
   it("단계 1개는 공백 없음", () => {
     expect(findGaps(steps("brief"), byId, none, all)).toEqual([]);
+  });
+});
+
+describe("기능 카탈로그 20개 · 4단계 (2026-10-06)", () => {
+  const all = featuresFor({ mode: "expert", hasTurns: true });
+  const byId = new Map(all.map((f) => [f.id, f]));
+
+  it("전문가 기능은 20개, 모두 단계 라벨·아이콘·io 가 있다", () => {
+    expect(all).toHaveLength(20);
+    for (const f of all) {
+      expect(STAGES as string[]).toContain(f.category);
+      expect(f.icon, f.id).toBeTruthy();
+      expect(f.io, f.id).toBeTruthy();
+    }
+    expect(all.map((f) => f.category)).toEqual([...all.map((f) => f.category)].sort());
+  });
+  it("합병·이동된 id 는 레지스트리에 없고 LEGACY_FN 으로 승격된다", () => {
+    for (const old of ["pending_watch", "rule_gap", "mon_extract", "impact_graph"]) {
+      expect(byId.has(old), old).toBe(false);
+    }
+    const r = fromTemplate(
+      [{ fn: "pending_watch", confidential: false }, { fn: "rule_gap", confidential: true },
+       { fn: "mon_extract", confidential: false }], byId);
+    expect(r.dropped).toEqual([]);
+    expect(r.composition?.steps.map((s) => s.fn)).toEqual(["article_diff", "doc_review", "doc_review"]);
+    expect(r.composition?.steps[1]?.confidential).toBe(true);
+  });
+  it("impact_graph 는 모니터링 모드로 옮겨졌고 doc_review 도 거기 있다", () => {
+    const mon = featuresFor({ mode: "monitor", hasTurns: true }).map((f) => f.id);
+    expect(mon).toContain("impact_graph");
+    expect(mon).toContain("doc_review");
+    expect(mon).not.toContain("mon_extract");
+  });
+  it("추천 직무 3개는 모두 공백 0 이고 8단계 이내", () => {
+    const none = { hasTurns: false, hasFormCitations: false, hasAttachments: false };
+    for (const t of PRESET_TASKS) {
+      const r = fromTemplate(t.steps, byId);
+      expect(r.dropped, t.name).toEqual([]);
+      expect(r.composition!.steps.length).toBeLessThanOrEqual(8);
+      expect(findGaps(r.composition!.steps, byId, none, all), t.name).toEqual([]);
+    }
+  });
+  it("article_diff 의 방향 선택 · doc_review 의 관점 선택이 프롬프트를 바꾼다", () => {
+    const ad = byId.get("article_diff")!.form!.build;
+    expect(ad({ article: "의료법 제27조", direction: "시행 예정" })).toContain("시행 예정인 개정본");
+    expect(ad({ article: "의료법 제27조", direction: "시행 예정" })).not.toContain("개정 주석");
+    expect(ad({ article: "의료법 제27조", direction: "과거 개정" })).toContain("개정 주석");
+    expect(ad({ article: "의료법 제27조" })).toContain("개정 주석");
+    const dr = byId.get("doc_review")!.form!.build;
+    expect(dr({ perspective: "내규↔법령 갭" })).toContain("규정 조항 ↔ 근거 법령");
+    expect(dr({ perspective: "규제 추출" })).toContain("걸리는 법령");
+    expect(dr({})).toContain("규제 적합성");
+    const mon = featuresFor({ mode: "monitor", hasTurns: true }).find((f) => f.id === "doc_review")!;
+    expect(mon.form!.build({})).toContain("걸리는 법령"); // 모니터링 기본값 = 규제 추출
+  });
+  it("briefKindOf 는 자유 문자열을 종류 키로", () => {
+    expect(briefKindOf("답변서")).toBe("answer");
+    expect(briefKindOf("검토 보고")).toBe("review");
+    expect(briefKindOf("내용증명")).toBe("demand");
+    expect(briefKindOf("질의서")).toBe("inquiry");
+    expect(briefKindOf("")).toBe("opinion");
+    expect(briefKindOf(undefined)).toBe("opinion");
   });
 });

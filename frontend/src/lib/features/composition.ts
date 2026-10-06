@@ -10,7 +10,7 @@
  */
 
 import { apiFetch } from "@/lib/api/client";
-import type { Feature } from "@/lib/features/catalog";
+import { LEGACY_FN, type Feature } from "@/lib/features/catalog";
 
 export type CompositionFile = { id: string; name: string; chars: number };
 
@@ -142,7 +142,9 @@ export function fromTemplate(
   const dropped: string[] = [];
   const out: CompositionStep[] = [];
   for (const st of steps) {
-    const f = byId.get(st.fn);
+    // 합병·이동된 id 는 조용히 승격한다(2026-10-06) — 저장된 직무가 끊기지 않는다.
+    const fn = LEGACY_FN[st.fn] ?? st.fn;
+    const f = byId.get(fn);
     if (!f) { dropped.push(st.fn); continue; }
     out.push({ ...emptyStep(f), confidential: st.confidential });
   }

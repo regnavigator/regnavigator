@@ -32,11 +32,16 @@ import {
   type CompositionStep,
 } from "@/lib/features/composition";
 import type { TaskTemplate } from "@/lib/client/taskTemplates";
+import type { PresetTask } from "@/lib/features/presetTasks";
+import { STAGES, type Stage } from "@/lib/features/catalog";
 import { findGaps } from "@/lib/features/gaps";
 import type { AppMode } from "@/lib/store/mode";
 
 /** 대화에 나온 서식 인용 — form_find 가 목록으로 보여 준다. */
 export type FormCitation = { id: string; title: string; articleKey: string };
+
+/** 연계 종점이 서식이면 PageShell 이 쏜다 — 패널은 서식 기능 초안을 열어 목록을 펼친다. */
+export const OPEN_FORM_LIST_EVENT = "regnav:open-form-list";
 
 type Props = {
   threadId: string | null;
@@ -55,34 +60,16 @@ type Props = {
   onStop: () => void;
   /** 직무(task) 템플릿(2026-10-06) — 저장된 연계. 없으면 섹션 비노출 */
   templates: TaskTemplate[];
+  /** 추천 직무(코드 동봉) — "내 직무" 아래 "추천 직무"로 */
+  presets: PresetTask[];
   onSaveTemplate: (name: string) => Promise<void>;
-  onLoadTemplate: (t: TaskTemplate) => void;
+  onLoadTemplate: (t: { steps: TaskTemplate["steps"] }) => void;
   onRenameTemplate: (t: TaskTemplate, name: string) => Promise<void>;
   onDeleteTemplate: (t: TaskTemplate) => Promise<void>;
 };
 
 const BLANK: Composition = { steps: [], cursor: 0, mode: "stepwise", status: "draft" };
 
-const CATEGORY_ICON: Record<string, string> = {
-  "규제 경로 분해": "checklist",
-  "서식 작성": "description",
-  "기밀 검토": "lock",
-  "문서 검토": "attach_file",
-  "판례 검토": "balance",
-  "조문 변동": "difference",
-  "규정 점검": "rule",
-  "의무 정리": "fact_check",
-  "지역 비교": "map",
-  유권해석: "quick_reference_all",
-  "인용 검증": "verified",
-  "제재 가늠": "scale",
-  "개정 추적": "update",
-  "영향 분석": "hub",
-  "서면 작성": "draft",
-  "대상 정의": "track_changes",
-  "자료 검토": "upload_file",
-  "변경 추적": "notifications_active",
-};
 
 /** 파일을 붙일 수 있는 기능 — 파일이 핵심이거나 기밀 검토일 때만. 서식 작성에 파일을
  *  올리라고 하던 것은 지침으로 폐지(2026-10-05). */
@@ -112,6 +99,7 @@ export function CompositionPanel({
   onUseAsForm,
   onStop,
   templates,
+  presets,
   onSaveTemplate,
   onLoadTemplate,
   onRenameTemplate,
@@ -130,12 +118,10 @@ export function CompositionPanel({
   const fileRef = useRef<HTMLInputElement | null>(null);
   const fillSeq = useRef(0);
 
-  // 패널을 여는 기능(brief·watch)은 턴으로 보낼 문장이 없다 — 입력창의 전용
-  // 버튼(의견서 초안·관찰 목록)으로 연다. 여기서는 뺀다.
+  // 관찰 목록(watch)은 턴으로 보낼 문장이 없다 — 입력창 전용 버튼으로 연다. 서면(brief)은
+  // 2026-10-06 부터 연계의 **종점 단계**로 패널에 선다(바로 실행 = 모달, 연계 = 종합 뒤 모달).
   const all = useMemo(
-    () => featuresFor({ mode, hasTurns: true }).filter(
-      (f) => f.triggers !== "brief" && f.triggers !== "watch",
-    ),
+    () => featuresFor({ mode, hasTurns: true }).filter((f) => f.triggers !== "watch"),
     [mode],
   );
   const byId = useMemo(() => new Map(all.map((f) => [f.id, f])), [all]);
@@ -198,6 +184,16 @@ export function CompositionPanel({
 
   const addDraft = () => {
     if (!draft) return;
+    // 서면은 연계의 **마지막**에만(2026-10-06) — 종합이 곧 서면의 재료라 뒤에 단계가 올 수 없다.
+    const hasBrief = c.steps.some((st, i) => byId.get(st.fn)?.triggers === "brief" && i !== draft.idx);
+    if (draft.f.triggers === "brief" && draft.idx !== undefined && draft.idx !== c.steps.length - 1) {
+      toast.error("서면 초안은 연계의 마지막 단계여야 합니다.");
+      return;
+    }
+    if (hasBrief && draft.idx === undefined) {
+      toast.error("서면 초안 뒤에는 단계를 더할 수 없습니다 — 서면을 빼거나 그 앞에 넣어 주세요.");
+      return;
+    }
     if (draft.idx !== undefined) {
       const steps = c.steps.slice();
       steps[draft.idx] = draft.st;
@@ -293,6 +289,45 @@ export function CompositionPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [!!draft]);
 
+  const tile = (f: Feature) => {
+    const active = draft?.f.id === f.id && draft.idx === undefined;
+    return (
+      <li key={f.id} className="mb-1">
+        <button
+          type="button"
+          data-add-feature={f.id}
+          aria-pressed={active}
+          onClick={() => startDraft(f)}
+          title={f.expects.join("\n")}
+          className={
+            "flex w-full items-start gap-2 rounded-[8px] border p-2 text-left transition-colors " +
+            (active
+              ? "border-md-primary bg-md-primary-container/40"
+              : "border-md-outline-variant bg-md-surface-container-lowest hover:border-md-primary hover:bg-md-surface-container-low")
+          }
+        >
+          <span className="material-symbols-outlined mt-[1px] text-[16px] text-md-primary" aria-hidden>
+            {f.icon ?? "bolt"}
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-[12px] font-semibold leading-snug text-md-on-surface">
+              {f.title}
+            </span>
+            <span className="block truncate text-[10.5px] leading-snug text-md-on-surface-variant">
+              {f.subtitle}
+            </span>
+          </span>
+        </button>
+      </li>
+    );
+  };
+
+  useEffect(() => {
+    const open = () => { const f = byId.get("form_find"); if (f) startDraft(f); };
+    window.addEventListener(OPEN_FORM_LIST_EVENT, open);
+    return () => window.removeEventListener(OPEN_FORM_LIST_EVENT, open);
+  }, [byId, startDraft]);
+
   const isFormFind = draft?.f.id === "form_find";
   const showFormList = isFormFind && !!onUseAsForm && formCitations.length > 0;
 
@@ -369,40 +404,40 @@ export function CompositionPanel({
                   </li>
                 ))}
               </ul>
-              <div className="mb-1 mt-2 text-[10.5px] font-semibold text-md-on-surface-variant">기능</div>
             </li>
           ) : null}
-          {shown.length ? shown.map((f) => {
-            const active = draft?.f.id === f.id && draft.idx === undefined;
-            return (
-              <li key={f.id} className="mb-1">
-                <button
-                  type="button"
-                  data-add-feature={f.id}
-                  aria-pressed={active}
-                  onClick={() => startDraft(f)}
-                  title={f.expects.join("\n")}
-                  className={
-                    "flex w-full items-start gap-2 rounded-[8px] border p-2 text-left transition-colors " +
-                    (active
-                      ? "border-md-primary bg-md-primary-container/40"
-                      : "border-md-outline-variant bg-md-surface-container-lowest hover:border-md-primary hover:bg-md-surface-container-low")
-                  }
-                >
-                  <span className="material-symbols-outlined mt-[1px] text-[16px] text-md-primary" aria-hidden>
-                    {CATEGORY_ICON[f.category] ?? "bolt"}
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[12px] font-semibold leading-snug text-md-on-surface">
-                      {f.title}
-                    </span>
-                    <span className="block truncate text-[10.5px] leading-snug text-md-on-surface-variant">
-                      {f.subtitle}
-                    </span>
-                  </span>
-                </button>
-              </li>
-            );
+          {presets.length && !q.trim() ? (
+            <li className="mb-2" data-testid="composition-presets">
+              <div className="mb-1 flex items-center gap-1 text-[10.5px] font-semibold text-md-on-surface-variant">
+                <span className="material-symbols-outlined text-[13px] text-md-primary" aria-hidden>auto_awesome</span>
+                추천 직무
+              </div>
+              <ul>
+                {presets.map((t) => (
+                  <li key={t.id} className="mb-1">
+                    <button type="button" data-preset={t.id} onClick={() => onLoadTemplate(t)}
+                            title={t.steps.map((x) => byId.get(x.fn)?.title ?? x.fn).join(" → ")}
+                            className="flex w-full flex-col rounded-[8px] border border-dashed border-md-outline-variant bg-md-surface-container-lowest p-2 text-left hover:border-md-primary">
+                      <span className="block truncate text-[12px] font-semibold leading-snug text-md-on-surface">{t.name}</span>
+                      <span className="block truncate text-[10.5px] leading-snug text-md-on-surface-variant">
+                        {t.steps.length}단계 · {t.about}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </li>
+          ) : null}
+          {shown.length ? shown.flatMap((f, idx) => {
+            // 단계 머리글(2026-10-06) — 카테고리가 바뀌는 자리에. 검색 중엔 생략.
+            const prev = idx > 0 ? shown[idx - 1]!.category : null;
+            const head = !q.trim() && f.category !== prev && (STAGES as string[]).includes(f.category)
+              ? [<li key={`stage-${f.category}`} data-stage={f.category}
+                    className="mb-1 mt-2 first:mt-0 text-[10.5px] font-semibold text-md-on-surface-variant">
+                  {f.category as Stage}
+                </li>]
+              : [];
+            return [...head, tile(f)];
           }) : (
             <li className="px-1 py-4 text-center text-[12px] text-md-on-surface-variant">
               해당하는 기능이 없습니다.

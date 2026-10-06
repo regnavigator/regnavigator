@@ -14,6 +14,7 @@
 import { useMemo, useState } from "react";
 
 import type { TaskTemplate } from "@/lib/client/taskTemplates";
+import type { PresetTask } from "@/lib/features/presetTasks";
 import { useMode } from "@/components/providers/ModeProvider";
 import { useSession } from "next-auth/react";
 import { FeatureCards } from "@/components/feature/FeatureCards";
@@ -35,12 +36,14 @@ type Props = {
   onPickPrompt?: (text: string, hint?: { docKinds?: string[] }) => void;
   /** 저장된 직무(2026-10-06) — 있으면 타일 맨 앞에 "내 직무"로 선다 */
   templates?: TaskTemplate[];
-  onPickTemplate?: (t: TaskTemplate) => void;
+  /** 추천 직무(2026-10-06) — 저장분이 없을 때만 타일로 선다 */
+  presets?: PresetTask[];
+  onPickTemplate?: (t: { steps: TaskTemplate["steps"] }) => void;
 };
 
 const TEMPLATE_PREFIX = "task:";
 
-export function EmptyHero({ configured, onPickPrompt, templates, onPickTemplate }: Props) {
+export function EmptyHero({ configured, onPickPrompt, templates, presets, onPickTemplate }: Props) {
   const { data: session } = useSession();
   // 고른 카드 — 공용 템플릿 모달이 받는다(2026-10-02 레지스트리 분리).
   const [picked, setPicked] = useState<Feature | null>(null);
@@ -56,19 +59,27 @@ export function EmptyHero({ configured, onPickPrompt, templates, onPickTemplate 
   // 카드 정의는 레지스트리가 단일 출처 — 스레드 내 피커와 같은 목록을 쓴다.
   const features = useMemo(() => {
     const base = featuresFor({ mode, hasTurns: false });
-    if (!templates?.length || !onPickTemplate) return base;
+    if (!onPickTemplate) return base;
     // 직무를 Feature 모양으로 — Feature 타입은 건드리지 않는다. id 접두사로 구분.
-    const taskTiles: Feature[] = templates.map((t) => ({
+    // 저장분이 있으면 그것만, 없으면 추천 직무(2026-10-06).
+    const list: { id: string; name: string; steps: TaskTemplate["steps"]; about?: string }[] =
+      templates?.length ? templates : (presets ?? []);
+    const label = templates?.length ? "내 직무" : "추천 직무";
+    const taskTiles: Feature[] = list.map((t) => ({
       id: `${TEMPLATE_PREFIX}${t.id}`,
-      category: "내 직무",
+      category: label,
+      icon: "account_tree",
       title: t.name,
-      subtitle: `${t.steps.length}단계 연계`,
+      subtitle: `${t.steps.length}단계 연계${t.about ? ` · ${t.about}` : ""}`,
       expects: [],
     }));
     return [...taskTiles, ...base];
-  }, [mode, templates, onPickTemplate]);
-  const templateById = useMemo(
-    () => new Map((templates ?? []).map((t) => [`${TEMPLATE_PREFIX}${t.id}`, t])), [templates]);
+  }, [mode, templates, presets, onPickTemplate]);
+  const templateById = useMemo(() => {
+    const list: { id: string; steps: TaskTemplate["steps"] }[] =
+      templates?.length ? templates : (presets ?? []);
+    return new Map(list.map((t) => [`${TEMPLATE_PREFIX}${t.id}`, t]));
+  }, [templates, presets]);
   // 첫 화면은 스레드가 아직 없다 → 전역 키. 첫 전송 때 adoptConfidential 이 옮긴다.
   const run = useRunFeature({ mode, onPrefill: onPickPrompt, threadId: null });
   const subtitle =

@@ -15,37 +15,10 @@ import { useMemo, useRef, useState } from "react";
 
 import type { Feature } from "@/lib/features/catalog";
 
-const CATEGORY_ICON: Record<string, string> = {
-  "내 직무": "account_tree",
-  // 전문가 — 기능 단위
-  "규제 경로 분해": "checklist",
-  "서식 작성": "description",
-  "기밀 검토": "lock",
-  "문서 검토": "attach_file",
-  "판례 검토": "balance",
-  "조문 변동": "difference",
-  "규정 점검": "rule",
-  "의무 정리": "fact_check",
-  "지역 비교": "map",
-  유권해석: "quick_reference_all",
-  "인용 검증": "verified",
-  "제재 가늠": "scale",
-  "개정 추적": "update",
-  "영향 분석": "hub",
-  "서면 작성": "draft",
-  // 일반 — 상황 단위
-  "생활·계약": "home_work",
-  일터: "work",
-  "창업·영업": "storefront",
-  행정처분: "gavel",
-  // 모니터링 — 종전엔 빠져 있어 전부 fallback(bolt)으로 그려졌다.
-  "대상 정의": "track_changes",
-  "자료 검토": "upload_file",
-  "변경 추적": "notifications_active",
-};
 
+/** 기능별 아이콘(`Feature.icon`). 없으면 범용 번개. */
 function icon(f: Feature): string {
-  return CATEGORY_ICON[f.category] ?? "bolt";
+  return f.icon ?? "bolt";
 }
 
 export function FeatureCards({

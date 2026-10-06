@@ -68,8 +68,9 @@ import { MonitorWorkDialog } from "@/components/monitor/MonitorWorkDialog";
 import { WATCH_CHANGED_EVENT } from "@/components/monitor/WatchPanel";
 import { addWatch, listWatch, removeWatch } from "@/lib/client/monitorThreads";
 import type { ChatState } from "@/lib/store/types";
-import { type Feature, featuresFor } from "@/lib/features/catalog";
-import { CompositionPanel, type FormCitation } from "@/components/panel/CompositionPanel";
+import { type Feature, briefKindOf, featuresFor } from "@/lib/features/catalog";
+import { CompositionPanel, OPEN_FORM_LIST_EVENT, type FormCitation } from "@/components/panel/CompositionPanel";
+import { PRESET_TASKS, type PresetTask } from "@/lib/features/presetTasks";
 import {
   createTaskTemplate,
   deleteTaskTemplate,
@@ -179,10 +180,10 @@ function PageShellInner() {
   }, [reloadTemplates]);
 
   /** 첫 화면에서 직무를 눌렀을 때 — 스레드가 생긴 뒤 적용할 템플릿 */
-  const pendingTemplateRef = useRef<TaskTemplate | null>(null);
+  const pendingTemplateRef = useRef<{ steps: TaskTemplate["steps"] } | null>(null);
 
   const applyTemplate = useCallback(
-    async (t: TaskTemplate, tid: string) => {
+    async (t: { steps: TaskTemplate["steps"] }, tid: string) => {
       const all = featuresFor({ mode, hasTurns: true });
       const byId = new Map(all.map((f) => [f.id, f]));
       const { composition: c, dropped } = fromTemplate(t.steps, byId);
@@ -206,7 +207,7 @@ function PageShellInner() {
    * 실행할 수도 없다. 채팅은 첫 메시지에서 lazy 생성하지만 조합은 그 전에
    * 필요하다 — 열자마자 만든다.
    */
-  const openComposer = useCallback(async (template?: TaskTemplate) => {
+  const openComposer = useCallback(async (template?: { steps: TaskTemplate["steps"] }) => {
     setComposer(true);
     if (threadId) {
       if (template) void applyTemplate(template, threadId);
@@ -279,6 +280,13 @@ function PageShellInner() {
   /** 패널의 "바로 실행" — 기능 하나를 보이는 턴으로 지금 보낸다. */
   const runFeatureNow = useCallback(
     (f: Feature, st: CompositionStep) => {
+      // 서면 초안은 턴이 아니라 모달이다(2026-10-06) — 종류만 들고 이벤트를 쏜다.
+      if (f.triggers === "brief") {
+        window.dispatchEvent(new CustomEvent(OPEN_BRIEF_EVENT, {
+          detail: { kind: briefKindOf(st.values.kind) },
+        }));
+        return;
+      }
       if (f.triggers === "confidential" && autoEnableConfidential(mode, threadId)) {
         toast.info("기밀 모드를 켰습니다 — 이 대화는 원내 모델로만 처리됩니다.", {
           duration: 7000,
@@ -364,6 +372,12 @@ function PageShellInner() {
             });
             return;
           }
+          // 서면 단계는 턴이 없다(2026-10-06) — 종합 뒤 모달로 연다(아래 종점 처리). done 만 찍는다.
+          if (f.triggers === "brief") {
+            steps = steps.map((x, i) => (i === cur ? { ...x, done: true } : x));
+            cur += 1;
+            continue;
+          }
 
           // 단계 = 숨은 턴. 기밀은 **이 단계의 값**을 쓴다(전역 토글 아님).
           await chat.send(stepMessage(f, st, cur, { fromConversation }), {
@@ -441,6 +455,19 @@ function PageShellInner() {
           // 내용을 읽어야 하므로, 상용으로 보내면 격리가 여기서 무너진다.
           const anyConf = steps.some((x) => x.confidential);
           await chat.send(synthesisMessage(titles), { confidential: anyConf });
+          // 종점 기능(2026-10-06) — 마지막 단계가 서면이면 종합을 재료로 모달을 연다.
+          // 서식이면 패널의 서식 목록을 펼친다(CompositionPanel 이 이벤트를 받는다).
+          const last = steps.at(-1);
+          const lastF = last ? byId.get(last.fn) : undefined;
+          if (lastF?.triggers === "brief") {
+            if (await waitIdle()) {
+              window.dispatchEvent(new CustomEvent(OPEN_BRIEF_EVENT, {
+                detail: { kind: briefKindOf(last!.values.kind) },
+              }));
+            }
+          } else if (lastF?.id === "form_find") {
+            window.dispatchEvent(new Event(OPEN_FORM_LIST_EVENT));
+          }
           // 끝난 연계는 **비운다**(2026-10-06 지적: "사용하고 나면 없어져야"). 남겨 두면
           // 다음 연계를 짤 때 섞이고, 종합이 이미 대화에 있으니 다시 볼 이유도 없다.
           // 단계별 모드로 중간에 멈춘 것·오류로 멈춘 것만 남는다(이어 돌려야 하므로).
@@ -621,6 +648,7 @@ function PageShellInner() {
       onUseAsForm={showPro ? handleUseAsForm : undefined}
       onStop={() => { stopRef.current = true; chat.stop(); }}
       templates={templates}
+      presets={PRESET_TASKS}
       onSaveTemplate={saveTemplate}
       onLoadTemplate={(t) => void openComposer(t)}
       onRenameTemplate={renameTemplate}
@@ -779,6 +807,7 @@ function PageShellInner() {
             }}
             forceProcess={composing}
             templates={showPro ? templates : undefined}
+            presets={showPro ? PRESET_TASKS : undefined}
             onPickTemplate={(t) => void openComposer(t)}
           />
         </div>
@@ -933,6 +962,7 @@ function PageShellInner() {
               }}
               forceProcess={composing}
               templates={showPro ? templates : undefined}
+              presets={showPro ? PRESET_TASKS : undefined}
               onPickTemplate={(t) => void openComposer(t)}
             />
           </Panel>
@@ -1037,7 +1067,8 @@ type ChatColumnProps = {
   onOpenComposer?: () => void;
   /** 첫 화면 "내 직무" 타일(2026-10-06) — 전문가 모드에서만 채워진다 */
   templates?: TaskTemplate[];
-  onPickTemplate?: (t: TaskTemplate) => void;
+  presets?: PresetTask[];
+  onPickTemplate?: (t: { steps: TaskTemplate["steps"] }) => void;
 };
 
 /**
@@ -1104,6 +1135,7 @@ function ChatColumn({
   onOpenComposer,
   forceProcess,
   templates,
+  presets,
   onPickTemplate,
 }: ChatColumnProps) {
   const { mode } = useMode();
@@ -1144,12 +1176,14 @@ function ChatColumn({
   // 의견서 초안 — 버튼(ChatInput) → 이벤트 → 생성 → 패널. 생성은 즉시 끝난다
   // (골격 + 인용 목록만 만들고, 내용은 문단 수정으로 채운다).
   useEffect(() => {
-    const open = () => {
+    const open = (ev: Event) => {
       if (!threadId || briefBusyRef.current) return;
       briefBusyRef.current = true;
-      const t = toast.loading("의견서 초안을 만드는 중이에요…");
+      // 서면 종류(2026-10-06) — 패널·연계 종점이 detail 로 보낸다. 없으면 의견서.
+      const kind = (ev as CustomEvent<{ kind?: string } | undefined>).detail?.kind;
+      const t = toast.loading("서면 초안을 만드는 중이에요…");
       void import("@/lib/client/documents")
-        .then((m) => m.createBrief(threadId))
+        .then((m) => m.createBrief(threadId, undefined, kind))
         .then((d) => {
           setBriefId(d.report_id);
           toast.success(`${d.title} — 문단을 눌러 고쳐 쓰세요`, { id: t });
@@ -1529,6 +1563,7 @@ function ChatColumn({
             configured={configured}
             onPickPrompt={(p, h) => { setDraftHint(h ?? null); setDraftPrefill(p); }}
             templates={templates}
+            presets={presets}
             onPickTemplate={onPickTemplate}
           />
           {/* vt-chat-input: 첫 메시지 전송 시 스레드 하단 입력창과 shared-element

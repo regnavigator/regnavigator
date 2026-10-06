@@ -226,6 +226,26 @@ app/(chat)/new/page.tsx ← /new 마커
 
 ---
 
+## 11-a. 기능 카탈로그 — 20개 · 4단계 (2026-10-06)
+
+진실원 `lib/features/catalog.ts`. 카테고리는 업무 흐름 4단계로 고정(`Stage`, 번호가 순서)이고 첫 화면
+타일·패널 1열·연계 목록이 같은 라벨을 쓴다. 기능별 `icon`, 연계용 `io {needs, yields}`(슬롯 어휘 12개).
+
+| 단계 | 기능 (id) |
+|---|---|
+| 1 파악 | 사실관계·타임라인 `facts_timeline` · 확인 질문 `question_list` · 사건 파일 검토 `case_issues` · 문서 검토(관점: 적합성/내규 갭/규제 추출/위험 조항) `doc_review` |
+| 2 조사 | 판례 `prec_issues` · 유권해석 `interpretation` · 조문 변동(과거/시행 예정) `article_diff` · 조례 비교 `ordinance_compare` |
+| 3 분석 | 법리 검토 `legal_memo` · 판례 적용 비교 `precedent_compare` · 증거 계획 `evidence_map` · 상대 주장 분석 `counter_argument` · 의무 매트릭스 `duty_matrix` · 인허가 경로 `pathway` · 제재 수위 `sanction_level` · 인용 검증 `cite_verify` |
+| 4 산출 | 기한 일정표 `deadline_calendar` · 서식 `form_find` · 서면 초안(의견서·검토 보고·내용증명·답변서·질의서) `brief` · 의뢰인용 설명 `client_brief` |
+
+- 합병·이동된 id(`pending_watch`·`rule_gap`·`mon_extract`→`LEGACY_FN`, `impact_graph`→모니터링)는 저장된
+  직무에서 조용히 승격된다. `brief` 는 연계의 **마지막 단계만** 될 수 있고(패널이 막는다) 종합 뒤 모달로
+  열린다(`OPEN_BRIEF_EVENT` detail `{kind}` → `POST /documents/from-brief {kind}`). `form_find` 가 마지막이면
+  서식 목록이 펼쳐진다(`OPEN_FORM_LIST_EVENT`).
+- 추천 직무 3(`presetTasks.ts`): 사건 초기 검토(7) · 인허가·컴플라이언스 자문(4) · 상대 서면 대응(6).
+  저장분이 없을 때 첫 화면에, 패널에선 "내 직무" 아래 항상. 셋 다 `findGaps` 공백 0(테스트).
+- 범위 고지 2건 추가(`legal.FEATURE_CAVEATS`): `deadline`(기한 계산 참고용) · `client`(변호사 검토 후 전달).
+
 ## 11-b. 기능 조합(composition) — 전문가 모드 전용
 
 > **2026-10-05 — "기능연계" 패널로 통합(2차 재설계).** 사용자 지침: 첫 화면 타일(단순 실행)은

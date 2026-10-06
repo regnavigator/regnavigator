@@ -42,6 +42,40 @@ BRIEF_SECTIONS: list[dict] = [
      "focus": "단정하지 않는다 — 확인이 필요한 사항을 남긴다"},
 ]
 
+#: 서면 종류별 골격(2026-10-06). 의견서 외 넷은 제목·섹션 구성만 다르다 — 채우는 방식은 같다.
+BRIEF_KINDS: dict[str, dict] = {
+    "opinion": {"label": "의견서", "sections": BRIEF_SECTIONS},
+    "review": {"label": "검토 보고", "sections": [
+        {"key": "summary", "title": "요약", "focus": "결론과 핵심 근거를 세 문장 안에"},
+        {"key": "facts", "title": "사실관계", "focus": "다툼 없는 사실과 다투는 사실을 구분"},
+        {"key": "analysis", "title": "검토", "focus": "쟁점별 요건 충족 여부와 근거 번호"},
+        {"key": "recommend", "title": "권고", "focus": "선택지와 각각의 위험 — 단정하지 않는다"},
+    ]},
+    "demand": {"label": "내용증명", "sections": [
+        {"key": "to", "title": "수신", "focus": "상대방 특정(상호·대표자·주소는 사용자가 채운다)"},
+        {"key": "facts", "title": "사실관계", "focus": "요구의 근거가 되는 사실만 시간순으로"},
+        {"key": "demand", "title": "요구 사항", "focus": "무엇을 언제까지 — 근거 조문을 단다"},
+        {"key": "deadline", "title": "기한과 불이행 시 조치", "focus": "기한은 계산 근거와 함께, 조치는 법적 근거가 있는 것만"},
+    ]},
+    "answer": {"label": "답변서", "sections": [
+        {"key": "claims", "title": "상대방 주장 요지", "focus": "쟁점별로 번호를 붙여 중립적으로"},
+        {"key": "rebuttal", "title": "반박", "focus": "주장마다 사실·법리 반박을 분리"},
+        {"key": "law", "title": "근거 법령·판례", "focus": "인용 번호가 있는 것만"},
+        {"key": "conclusion", "title": "결론", "focus": "구하는 바를 명확히 — 단정은 피한다"},
+    ]},
+    "inquiry": {"label": "질의서", "sections": [
+        {"key": "background", "title": "질의 배경", "focus": "사실관계와 질의에 이른 경위"},
+        {"key": "questions", "title": "질의 사항", "focus": "번호를 붙여 한 질문에 한 쟁점"},
+        {"key": "law", "title": "관련 규정", "focus": "질의마다 관련 조문을 단다"},
+    ]},
+}
+
+
+def sections_for(kind: str | None) -> list[dict]:
+    """종류 키 → 섹션. 모르는 키는 의견서(기본)."""
+    return (BRIEF_KINDS.get((kind or "").strip()) or BRIEF_KINDS["opinion"])["sections"]
+
+
 #: 한 서면이 가질 수 있는 최대 문단 — 넘으면 수정 UI 가 의미를 잃는다.
 MAX_PARAGRAPHS = 400
 
@@ -287,6 +321,8 @@ def compose_from_thread(
     citations: list[dict],
     *,
     title: str,
+    kind: str | None = None,
+    hidden: list[bool] | None = None,
 ) -> str:
     """대화와 인용으로 **채워진** 초안을 조립한다. LLM 을 쓰지 않는다.
 
@@ -296,7 +332,17 @@ def compose_from_thread(
     - 검토/결론 : 이미 근거 검증을 거친 답변 본문
     각 섹션에 재료가 없으면 비워 두지 않고 **"대화에서 확인되지 않음"** 으로
     표시한다 — 빈 칸은 빠뜨린 것인지 없는 것인지 구분이 안 된다(원칙 5와 같다).
+
+    `kind`(2026-10-06): 의견서 외 종류는 **섹션 구성만** 다르다 — 같은 재료(사실·쟁점·
+    법령·검토)를 `BRIEF_KINDS[kind]` 의 섹션 키에 맞춰 놓고, 재료가 없는 섹션은 안내문.
     """
+    # 숨은 턴(연계 중간 단계)은 재료가 아니다(2026-10-06 실측: 단계 프롬프트 6개가 "상대방
+    # 주장 요지"에 그대로 올라왔다). 종합·사용자 발화만 쓴다.
+    if hidden:
+        messages = [m for i, m in enumerate(messages) if not (i < len(hidden) and hidden[i])]
+    k = (kind or "").strip() or "opinion"
+    if k != "opinion" and k in BRIEF_KINDS:
+        return _compose_kind(messages, citations, title=title, kind=k)
     humans = [_msg_text(m) for m in messages
               if getattr(m, "type", "") == "human"]
     ais = [_strip_preamble(_strip_markers(_msg_text(m))) for m in messages
@@ -373,6 +419,59 @@ def compose_from_thread(
                        + (f" — {u}" if u else ""))
         out.append("")
 
+    return "\n".join(out).rstrip() + "\n"
+
+
+def _compose_kind(messages: list, citations: list[dict], *, title: str, kind: str) -> str:
+    """의견서 외 종류 — 섹션 키별 재료 매핑. 재료 추출은 의견서와 같은 규칙."""
+    humans = [h for h in (_msg_text(m) for m in messages
+                          if getattr(m, "type", "") == "human") if h]
+    ais = [a for a in (_strip_preamble(_strip_markers(_msg_text(m))) for m in messages
+                       if getattr(m, "type", "") == "ai") if len(a) > 80]
+    facts = [f for f in (_facts_only(h) for h in humans) if f]
+    laws = [c for c in citations if c.get("source_kind") != "web"]
+    spec = BRIEF_KINDS[kind]
+
+    def _missing(what: str) -> str:
+        return f"_（{what} — 대화에서 확인되지 않았습니다. 직접 작성하세요.）_"
+
+    out: list[str] = [f"# {title.strip() or spec['label']}", ""]
+    for sec in spec["sections"]:
+        key, t = sec["key"], sec["title"]
+        out += [f"## {t}", ""]
+        if key == "facts" or key == "background":
+            if facts:
+                out += ["\n\n".join(facts)[:_MAX_FACT_CHARS], ""]
+            else:
+                out += [_missing(t), ""]
+        elif key in ("claims", "questions"):
+            # 상대 주장·질의 사항 — 사용자가 쓴 것을 번호로. 없으면 안내.
+            if humans:
+                out += [f"{i}. {' '.join(h.split())[:160]}" for i, h in enumerate(humans, 1)] + [""]
+            else:
+                out += [_missing(t), ""]
+        elif key == "law":
+            if laws:
+                for c in laws[:40]:
+                    tt = str(c.get("title") or "").strip() or "(제목 없음)"
+                    out.append(f"- `[{c.get('number')}]` {tt}")
+                out.append("")
+            else:
+                out += [_missing(t), ""]
+        elif key in ("analysis", "rebuttal", "summary"):
+            if ais:
+                out += [ais[-1][:_MAX_SECTION_CHARS], ""]
+            else:
+                out += [_missing(t), ""]
+        else:
+            # 수신·요구·기한·권고·결론 — 사용자가 채울 자리. focus 가 안내문.
+            out += [f"_{sec['focus']}_", ""]
+    if any(c.get("source_kind") == "web" for c in citations):
+        out += ["## 참고(웹 자료)", ""]
+        for c in [c for c in citations if c.get("source_kind") == "web"][:15]:
+            u = str(c.get("url") or "").strip()
+            out.append(f"- `[{c.get('number')}]` {c.get('title')}" + (f" — {u}" if u else ""))
+        out.append("")
     return "\n".join(out).rstrip() + "\n"
 
 

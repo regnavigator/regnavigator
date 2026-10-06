@@ -675,13 +675,13 @@ export function ChatInput({
                 data-testid="brief-open"
                 disabled={running}
                 onClick={() => window.dispatchEvent(new CustomEvent(OPEN_BRIEF_EVENT))}
-                title="지금까지의 대화로 의견서 초안을 만듭니다 — 문단별로 고쳐 쓸 수 있습니다"
+                title="지금까지의 대화로 서면 초안을 만듭니다(기본 의견서 — 종류는 기능연계 패널에서) — 문단별로 고쳐 쓸 수 있습니다"
                 className="inline-flex h-9 items-center gap-1.5 rounded-full px-3.5 text-[13px] font-medium text-md-on-surface-variant transition-colors hover:bg-md-surface-container-low hover:text-md-on-surface disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <span className="material-symbols-outlined text-[16px]" aria-hidden>
                   draft
                 </span>
-                의견서 초안
+                서면 초안
               </button>
             ) : null}
             {/* 심층 보고서 수동 트리거 — AI 제안(next_steps)에만 의존하던 발견성 개선.

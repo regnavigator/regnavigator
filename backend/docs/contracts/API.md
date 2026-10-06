@@ -693,6 +693,9 @@ GET /law-graph?keys=006364_000100,001275_000700&depth=1&rels=CITES&per_node_cap=
 `PATCH /chat/{tid}/workflow` 는 같은 날부터 **아직 없는 스레드를 호출자 소유로 만들어 받는다**
 (첫 화면에서 직무를 골라 복원할 때 서버 스레드가 아직 없다).
 
+`POST /documents/from-brief` 는 `kind`(`opinion`(기본)·`review`·`demand`·`answer`·`inquiry`, 10-06)를 받아
+그 종류의 골격(`src/brief.BRIEF_KINDS`)으로 초안을 만든다. 숨은 턴(연계 중간 단계)은 재료에서 뺀다.
+
 `POST /chat/{tid}/workflow/suggest` 는 응답을 바꾸지 않고 `events.judgment` 를 적재한다
 (`{site:"workflow_suggest", backend:"local|api|llm", fillable:0~1, filled:bool, n_fields}`) —
 판단 모델(`src/judgment.py`, `JUDGE_*` 노브) 임계값 측정용.

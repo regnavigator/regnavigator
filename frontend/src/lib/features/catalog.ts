@@ -53,8 +53,14 @@ export type Feature = {
    * 한계 고지(`legal.FEATURE_CAVEATS`) 키로도 쓴다.
    */
   docKinds?: string[];
-  /** 그룹 라벨 겸 뱃지 — 격자 피커가 이걸로 묶는다 */
-  category: string;
+  /**
+   * 업무 단계(2026-10-06). 종전 세부 라벨("판례 검토"·"조문 변동"…)은 검색 종별 기준이라
+   * "다음에 뭘 하지"를 말해 주지 않았다. 번호 붙은 4단계로 통일 — 타일·패널·연계 목록이
+   * 같은 라벨을 쓰고, 순서가 곧 업무 흐름이다. 일반·모니터링 카드는 자유 문자열 유지.
+   */
+  category: Stage | string;
+  /** Material Symbols 아이콘 — 기능별. 단계에 묶으면 같은 단계가 전부 같은 아이콘이 된다. */
+  icon?: string;
   title: string;
   subtitle: string;
   /** 구조화 입력 폼 — 빈 칸은 `___(라벨)` 로 남아 그대로 템플릿이 된다 */
@@ -97,11 +103,29 @@ export type Slot =
   | "duty"       // 의무 목록
   | "form"       // 서식
   | "sanction"   // 제재
-  | "doc";       // 첨부 문서
+  | "doc"        // 첨부 문서
+  | "analysis"   // 법리 검토 결과 (2026-10-06)
+  | "evidence"   // 증거·입증 계획 (2026-10-06)
+  | "deadline";  // 기한 (2026-10-06)
 
 export const SLOT_LABEL: Record<Slot, string> = {
   facts: "사실관계", issue: "쟁점", subject: "규제 대상", article: "조문", precedent: "판례",
   duty: "의무 목록", form: "서식", sanction: "제재", doc: "첨부 문서",
+  analysis: "법리 검토", evidence: "증거", deadline: "기한",
+};
+
+/** 전문가 업무 단계 — 번호가 곧 순서. 첫 화면 타일·패널·연계 목록이 같은 라벨을 쓴다. */
+export type Stage = "1 파악" | "2 조사" | "3 분석" | "4 산출";
+export const STAGES: Stage[] = ["1 파악", "2 조사", "3 분석", "4 산출"];
+
+/**
+ * 합병·이동된 기능 id → 지금 id (2026-10-06). 저장된 직무·조합이 끊기지 않게 `fromTemplate`
+ * 가 조용히 승격한다. `fn` 은 저장 어휘라 여기서만 바꾼다.
+ */
+export const LEGACY_FN: Record<string, string> = {
+  pending_watch: "article_diff",   // 같은 질문("이 조문 바뀌나"), 시점만 다름 → direction 선택지
+  rule_gap: "doc_review",          // 관점 "내규↔법령 갭"
+  mon_extract: "doc_review",       // 관점 "걸리는 규제 추출"
 };
 
 /** 빈 칸은 `___` 로 남긴다 — 프리필은 자동 전송되지 않으므로 그대로 템플릿이 된다. */
@@ -112,54 +136,62 @@ function slot(v: string | undefined, hint: string): string {
 
 const EXPERT: Feature[] = [
   {
-    id: "pathway",
-    io: { needs: ["subject"], yields: ["duty", "article", "form"] },
-    category: "규제 경로 분해",
-    title: "인허가·신고 의무를 단계로 분해",
-    subtitle: "무엇을 → 어디에 → 어떤 서식으로 → 언제까지",
+    id: "facts_timeline",
+    io: { needs: [["doc", "facts"]], yields: ["facts", "issue"] },
+    category: "1 파악",
+    icon: "timeline",
+    title: "사실관계·타임라인 정리",
+    subtitle: "일시 · 당사자 · 행위 · 증거를 시간순으로",
+    triggers: "confidential",
+    stickiness: "thread",
     expects: [
-      "단계별 체크리스트(접수처 · 서식 · 기한)",
-      "단계마다 근거 조문 — 근거 없는 단계는 따로 표시",
-      "빠뜨린 단계가 눈에 보이게",
+      "시간순 표 — 다툼 있는 사실과 없는 사실을 구분",
+      "법적 평가는 하지 않는다 — 다음 단계(쟁점 검토)의 재료",
+      "사건 자료라 기밀 모드가 켜진다",
     ],
     form: {
-      intro: "대상을 적으면 그 사안의 절차를 단계로 분해합니다.",
+      intro: "메모·파일 내용을 붙여 넣거나 첨부하면 사실관계를 시간순으로 정리합니다.",
       fields: [
-        { key: "subject", label: "대상 (사업 · 제품 · 행위)", placeholder: "예: 체외진단 의료기기 수입 / 일반음식점 개업" },
-        { key: "detail", label: "조건 (선택)", placeholder: "예: 2등급, 서울 마포구" },
+        { key: "source", label: "자료 (붙여 넣기 · 선택)", placeholder: "첨부가 있으면 비워 두세요" },
+        { key: "focus", label: "특히 볼 것 (선택)", placeholder: "예: 계약 체결부터 해지 통보까지" },
       ],
       build: (v) =>
-        `${slot(v.subject, "대상")}${v.detail?.trim() ? ` (${v.detail.trim()})` : ""} 와 관련해 밟아야 하는 ` +
-        "인허가 · 신고 · 보고 의무를 단계별 절차로 분해해줘. " +
-        "각 단계마다 어디에 접수하는지, 제출할 서식, 기한을 근거 조문과 함께 정리해줘.",
+        "다음 자료에서 사실관계를 시간순으로 정리해줘.\n\n" +
+        `[자료]\n${slot(v.source, "자료")}` +
+        `\n\n[특히 볼 것]\n${slot(v.focus, "특히 볼 것")}\n\n` +
+        "일시 · 당사자 · 행위 · 근거 자료를 표로 만들고, **다툼이 있는 사실과 없는 사실을 " +
+        "구분**해줘. 법적 평가나 결론은 적지 마 — 사실만. 자료에 없는 것은 지어내지 말고 " +
+        "'확인 필요'로 남겨.",
     },
   },
   {
-    id: "form_find",
-    io: { needs: ["subject"], yields: ["form", "article"] },
-    category: "서식 작성",
-    title: "제출 서식·별표를 찾아 바로 작성",
-    subtitle: "서식 번호 · 근거 조문 · 첨부 서류",
+    id: "question_list",
+    io: { needs: [["facts", "doc"]], yields: ["facts"] },
+    category: "1 파악",
+    icon: "help_center",
+    title: "확인 질문 목록",
+    subtitle: "의뢰인 · 상대 · 기관에 물을 것",
     expects: [
-      "근거 법령에 딸린 별지 서식 번호와 조문",
-      "함께 내야 하는 첨부 서류 목록",
-      "답변의 서식 인용에서 [이 서식으로 작성]으로 바로 기입",
+      "비어 있거나 다툼 있는 사실마다 '왜 필요한가(어느 요건)'와 함께 질문",
+      "대상별(의뢰인 / 상대방 / 기관) 묶음",
     ],
     form: {
-      intro: "무엇을 신청하는지 적으면 해당 서식을 찾아 작성 화면으로 연결합니다.",
+      intro: "사실관계에서 빠진 것을 질문 목록으로 바꿉니다. 앞 단계 결과를 그대로 씁니다.",
       fields: [
-        { key: "what", label: "신청 내용", placeholder: "예: 의료기기 제조업 허가 / 옥외광고물 표시 허가" },
-        { key: "who", label: "신청인 (선택)", placeholder: "예: 법인, 수입업자" },
+        { key: "target", label: "누구에게 (선택)", placeholder: "예: 의뢰인 / 상대방 / 관할 기관" },
       ],
       build: (v) =>
-        `${slot(v.what, "신청 내용")}${v.who?.trim() ? ` (${v.who.trim()})` : ""} 신청에 필요한 별지 서식·별표를 찾아줘. ` +
-        "서식 번호와 근거 조문, 함께 제출할 첨부 서류 목록까지 정리해줘.",
+        "지금까지 정리된 사실관계에서 **비어 있거나 다툼이 있는 부분**을 확인 질문으로 만들어줘.\n\n" +
+        `[누구에게]\n${slot(v.target, "누구에게")}\n\n` +
+        "질문마다 왜 필요한지(어느 법적 요건과 연결되는지)를 한 줄로 달고, 의뢰인·상대방·" +
+        "기관별로 묶어줘. 이미 확인된 사실은 묻지 마.",
     },
   },
   {
     id: "case_issues",
     io: { needs: [["facts", "doc"]], yields: ["issue", "article"] },
-    category: "기밀 검토",
+    category: "1 파악",
+    icon: "folder_open",
     stickiness: "thread",   // 한 번 켜지면 스레드 내내 유지된다
     title: "사건 파일로 적용 법령·쟁점 검토",
     subtitle: "원내 모델 전용 · 웹 검색 없음",
@@ -183,32 +215,58 @@ const EXPERT: Feature[] = [
   },
   {
     id: "doc_review",
-    io: { needs: ["doc"], yields: ["issue", "article"] },
-    category: "문서 검토",
+    io: { needs: ["doc"], yields: ["issue", "article", "duty"] },
+    category: "1 파악",
+    icon: "attach_file",
     stickiness: "thread",   // 첨부가 기밀을 켠다 — 역시 스레드 단위
-    title: "계약서·내부 규정을 첨부해 검토",
-    subtitle: "PDF · DOCX · HWPX · 기밀 모드 자동",
+    title: "문서 첨부해 검토",
+    subtitle: "적합성 · 내규↔법령 갭 · 규제 추출 · 위험 조항 — 관점 선택",
     triggers: "attach",
     expects: [
-      "첨부 문서를 읽고 규제 적합성·누락 조항 검토",
+      "관점에 따라 적합성 검토 / 내규 조항별 갭 표 / 걸리는 규제 목록 / 위험 조항 지적",
       "첨부 즉시 기밀 모드가 켜져 외부로 나가지 않음",
       "지적마다 근거 조문 제시",
     ],
     form: {
       intro: "파일 선택창이 열립니다. 문서를 고르면 기밀 모드가 함께 켜집니다.",
       fields: [
-        { key: "ask", label: "무엇을 봐 달라고 할까요", placeholder: "예: 개인정보 처리 조항이 현행법에 맞는지" },
+        {
+          key: "perspective",
+          label: "관점 (선택)",
+          placeholder: "적합성 검토(기본) / 내규↔법령 갭 / 규제 추출 / 위험 조항",
+        },
+        { key: "ask", label: "특히 볼 것 (선택)", placeholder: "예: 개인정보 처리 조항이 현행법에 맞는지" },
       ],
-      build: (v) =>
-        `첨부한 문서를 검토해줘. ${slot(v.ask, "무엇을 봐 드릴까요")}. ` +
-        "문제가 되는 부분은 근거 조문과 함께 짚어줘.",
+      build: (v) => {
+        const p = (v.perspective ?? "").trim();
+        const ask = v.ask?.trim() ? ` 특히: ${v.ask.trim()}.` : "";
+        if (/갭|내규/.test(p)) {
+          return "첨부한 내부 규정이 현행 법령을 반영하고 있는지 점검해줘." + ask + "\n\n" +
+            "규정 조항 ↔ 근거 법령 ↔ 상태(일치·미반영·충돌·근거없음)를 표로 정리하고, " +
+            "미반영·충돌이면 고쳐야 할 문구를 제안해줘. 근거 조문을 못 찾은 항목은 " +
+            "'근거 미확인'으로 남기고 추측하지 마.";
+        }
+        if (/추출|걸리는|규제/.test(p)) {
+          return "첨부한 문서가 걸리는 법령·행정규칙·조례를 뽑아줘." + ask + "\n\n" +
+            "문서의 어느 부분이 어느 조문에 걸리는지 짝지어 표로 만들고, 각 규제가 무엇을 " +
+            "요구하는지 한 줄로 요약해줘. 근거 조문을 함께 달아줘.";
+        }
+        if (/위험|리스크/.test(p)) {
+          return "첨부한 문서에서 법적 위험이 있는 조항을 짚어줘." + ask + "\n\n" +
+            "조항별로 위험의 내용·근거 조문·완화 방안을 표로 정리해줘. 근거 없는 조항은 " +
+            "'근거 미확인'으로 남겨.";
+        }
+        return `첨부한 문서를 검토해줘.${ask || " 규제 적합성과 누락 조항을 봐줘."} ` +
+          "문제가 되는 부분은 근거 조문과 함께 짚어줘.";
+      },
     },
   },
   {
     id: "prec_issues",
     io: { needs: ["issue"], yields: ["precedent"] },
     docKinds: ["prec"],
-    category: "판례 검토",
+    category: "2 조사",
+    icon: "balance",
     title: "판례 검색 · 핵심 이슈 정리",
     subtitle: "법원 · 선고일 · 판시 요지를 표로",
     expects: [
@@ -232,11 +290,37 @@ const EXPERT: Feature[] = [
     },
   },
   {
+    id: "interpretation",
+    io: { needs: [["issue", "article"]], yields: ["article"] },
+    docKinds: ["expc"],
+    category: "2 조사",
+    icon: "quick_reference_all",
+    title: "유권해석 · 행정해석 확인",
+    subtitle: "조문만으론 안 나오는 집행 기준",
+    expects: [
+      "법령해석례·행정심판례에서 집행 기준 확인",
+      "해석이 갈리면 그 이유까지",
+    ],
+    form: {
+      intro: "조문 문언으로 결론이 안 나는 쟁점에 씁니다.",
+      fields: [
+        { key: "issue", label: "쟁점", placeholder: "예: 중개 플랫폼 입점자가 '영업자'에 해당하는지" },
+        { key: "article", label: "관련 조문 (선택)", placeholder: "예: 식품위생법 제37조" },
+      ],
+      build: (v) =>
+        `다음 쟁점에 관한 유권해석·행정해석을 찾아줘.\n\n[쟁점]\n${slot(v.issue, "쟁점을 적어 주세요")}` +
+        `\n\n[관련 조문]\n${slot(v.article, "조문")}\n\n` +
+        "해석기관·회신일자·결론을 표로 정리하고, 해석이 갈리는 부분이 있으면 " +
+        "무엇 때문에 갈리는지 짚어줘. 기관과 일자가 확인되지 않는 해석은 쓰지 마.",
+    },
+  },
+  {
     id: "article_diff",
     io: { needs: ["article"], yields: ["article"] },
-    category: "조문 변동",
+    category: "2 조사",
+    icon: "difference",
     title: "조문 변동 대조",
-    subtitle: "현행 ↔ 개정예정 · 기준 시점 이후 개정 여부",
+    subtitle: "과거 개정 · 시행 예정 · 기준 시점 이후 개정 여부",
     expects: [
       "현행 조문과 개정예정본이 있으면 나란히 대조",
       "기준 시점(예: 판결 선고일) 이후 개정이 있었는지 판정",
@@ -248,52 +332,168 @@ const EXPERT: Feature[] = [
         "있지 않아, 그때 조문이 어땠는지는 개정 시점으로만 알려 드립니다.",
       fields: [
         { key: "article", label: "조문", placeholder: "예: 식품위생법 시행령 제25조" },
+        {
+          key: "direction",
+          label: "방향 (선택)",
+          placeholder: "과거 개정 확인 / 시행 예정 확인 / 둘 다(기본)",
+        },
         { key: "asof", label: "기준 시점 (선택)", placeholder: "예: 2022-08-25 (판결 선고일)" },
       ],
-      build: (v) =>
-        `다음 조문의 변동을 대조해줘.\n\n[조문]\n${slot(v.article, "조문을 적어 주세요")}` +
+      build: (v) => {
+        const d = (v.direction ?? "").trim();
+        const past = !d || /과거|둘 다|모두/.test(d);
+        const future = !d || /예정|시행|둘 다|모두/.test(d);
+        return `다음 조문의 변동을 대조해줘.\n\n[조문]\n${slot(v.article, "조문을 적어 주세요")}` +
         `\n\n[기준 시점]\n${slot(v.asof, "기준 시점")}\n\n` +
-        "① 현행 조문을 제시하고, 시행 예정인 개정본이 검색되면 나란히 " +
-        "대조해줘. ② 조문 본문에 붙은 개정 주석(<개정 …>, 삭제<…>)을 모아 " +
-        "개정 시점을 열거해줘. ③ 기준 시점이 있으면 그 이후 개정이 있었는지, " +
-        "그래서 그 시점 기준의 해석을 지금 그대로 쓸 수 있는지 판정해줘.\n\n" +
+        "① 현행 조문을 제시해줘. " +
+        (future ? "시행 예정인 개정본이 검색되면 나란히 대조하고, 시행일·유예기간·경과규정과 " +
+                  "지금 해 둬야 할 일을 정리해줘. **공포 전(입법예고·국회 계류) 자료는 이 시스템이 " +
+                  "보유하지 않는다 — 그 구간은 '확인 불가'로 적어라.** " : "") +
+        (past ? "② 조문 본문에 붙은 개정 주석(<개정 …>, 삭제<…>)을 모아 개정 시점을 열거해줘. " +
+                "③ 기준 시점이 있으면 그 이후 개정이 있었는지, 그래서 그 시점 기준의 해석을 지금 " +
+                "그대로 쓸 수 있는지 판정해줘. " : "") + "\n\n" +
         "**없는 것은 없다고 적어라.** 과거 시점의 조문 전문은 이 시스템이 " +
         "보유하지 않는다 — 추측해 쓰지 말고 '과거 조문 전문 확인 불가'라고 " +
         "적고 개정 시점만 제시해줘. 현행 조문도 검색 결과가 발췌뿐이면 " +
-        "발췌라고 밝히고, 뒷부분을 지어내지 마.",
+        "발췌라고 밝히고, 뒷부분을 지어내지 마.";
+      },
     },
   },
   {
-    id: "rule_gap",
-    io: { needs: ["doc"], yields: ["duty", "article"] },
-    category: "규정 점검",
-    title: "사내 규정 ↔ 법령 갭 점검",
-    subtitle: "첨부한 내규가 현행 법령을 반영했는지",
-    triggers: "attach",
-    stickiness: "thread",
+    id: "ordinance_compare",
+    io: { needs: [["subject", "facts"]], yields: ["article"] },
+    docKinds: ["ordin"],
+    category: "2 조사",
+    icon: "map",
+    title: "지자체별 조례 요건 비교",
+    subtitle: "같은 사업, 지역마다 다른 요건",
     expects: [
-      "내규 조항별로 근거 법령을 짚고, 빠졌거나 어긋난 곳을 표로",
-      "고쳐야 할 문구까지 제안",
-      "기밀 모드 자동 — 내부 문서는 밖으로 내보내지 않는다",
+      "지역별로 요건·수수료·처리기간 차이를 표로",
+      "조례가 검색되지 않은 지역은 '확인 불가'로 명시",
     ],
     form: {
-      intro: "사규·내규·업무지침을 첨부하세요. 조항 단위로 법령과 대조합니다.",
+      intro: "조례는 지자체마다 다릅니다. 비교할 지역을 적어 주세요.",
       fields: [
-        { key: "scope", label: "점검 범위", placeholder: "예: 개인정보 처리 관련 조항" },
-        { key: "asof", label: "기준 (선택)", placeholder: "예: 2026년 개정 반영 여부" },
+        { key: "subject", label: "사업 · 행위", placeholder: "예: 일반음식점 영업신고" },
+        { key: "regions", label: "비교할 지역", placeholder: "예: 서울 강남구, 경기 성남시, 부산 해운대구" },
       ],
       build: (v) =>
-        `첨부한 내부 규정이 현행 법령을 반영하고 있는지 점검해줘.\n\n` +
-        `[점검 범위]\n${slot(v.scope, "어디를 볼까요")}\n\n[기준]\n${slot(v.asof, "기준")}\n\n` +
-        "규정 조항 ↔ 근거 법령 ↔ 상태(일치·미반영·충돌·근거없음)를 표로 정리하고, " +
-        "미반영·충돌이면 고쳐야 할 문구를 제안해줘. 근거 조문을 못 찾은 항목은 " +
-        "'근거 미확인'으로 남기고 추측하지 마.",
+        `같은 사업에 대해 지자체별 조례 요건을 비교해줘.\n\n[사업·행위]\n${slot(v.subject, "무엇에 대한 비교인가요")}` +
+        `\n\n[비교할 지역]\n${slot(v.regions, "지역을 적어 주세요")}\n\n` +
+        "지역 × 요건(시설·면적·첨부서류·수수료·처리기간)을 표로 만들고, 상위 법령과 " +
+        "달라지는 지점을 짚어줘. **조례가 검색되지 않은 지역은 '확인 불가'로 적고 " +
+        "다른 지역 내용을 옮겨 쓰지 마.**",
+    },
+  },
+  {
+    id: "legal_memo",
+    io: { needs: ["issue", ["article", "precedent"]], yields: ["analysis"] },
+    category: "3 분석",
+    icon: "gavel",
+    title: "쟁점별 법리 검토",
+    subtitle: "요건 → 사실 포섭 → 결론",
+    expects: [
+      "쟁점마다 ① 조문 요건 ② 사실 포섭 ③ 판례 기준 ④ 결론과 불확실성",
+      "결론이 갈릴 수 있으면 양쪽을 다 적는다",
+      "요건별 근거 번호",
+    ],
+    form: {
+      intro: "앞 단계에서 정리된 쟁점·조문·판례를 적용해 결론을 냅니다.",
+      fields: [
+        { key: "issue", label: "쟁점 (선택)", placeholder: "앞 단계 결과가 있으면 비워 두세요" },
+        { key: "position", label: "우리 측 입장 (선택)", placeholder: "예: 원고 / 피신청인 / 자문 의뢰인" },
+      ],
+      build: (v) =>
+        "다음 쟁점에 대해 법리 검토를 해줘.\n\n" +
+        `[쟁점]\n${slot(v.issue, "쟁점")}` +
+        `\n\n[우리 측 입장]\n${slot(v.position, "입장")}\n\n` +
+        "쟁점마다 ① 적용 조문의 요건 ② 사실관계의 요건 포섭 ③ 판례가 세운 기준 ④ 결론과 " +
+        "남는 불확실성을 순서대로 적어줘. 요건마다 근거 번호를 달고, 결론이 갈릴 수 있으면 " +
+        "양쪽 논거를 다 써. 근거가 확인되지 않는 요건은 '근거 미확인'으로 남겨.",
+    },
+  },
+  {
+    id: "precedent_compare",
+    io: { needs: ["facts", "precedent"], yields: ["analysis"] },
+    category: "3 분석",
+    icon: "compare",
+    title: "판례 적용 비교",
+    subtitle: "우리 사실관계 ↔ 선례 — 같은 점 · 다른 점 · 구별 논거",
+    expects: [
+      "선례마다 요건별 사실 대조 표",
+      "적용 가능 / 구별(distinguish) 판정과 그 논거",
+    ],
+    form: {
+      intro: "앞 단계에서 찾은 판례를 우리 사실관계에 대조합니다.",
+      fields: [
+        { key: "focus", label: "특히 볼 요건 (선택)", placeholder: "예: 고의 여부 / 손해 발생 시점" },
+      ],
+      build: (v) =>
+        "앞에서 찾은 판례들을 우리 사실관계와 대조해줘.\n\n" +
+        `[특히 볼 요건]\n${slot(v.focus, "요건")}\n\n` +
+        "선례마다 요건별로 선례의 사실 ↔ 우리 사실을 표로 나란히 놓고, 같은 점·다른 점을 " +
+        "짚은 뒤 '적용 가능' 또는 '구별됨'으로 판정하고 논거를 적어줘. 사건번호가 확인되지 " +
+        "않는 판례는 쓰지 마.",
+    },
+  },
+  {
+    id: "evidence_map",
+    io: { needs: [["facts", "doc"], "issue"], yields: ["evidence"] },
+    category: "3 분석",
+    icon: "inventory",
+    title: "증거·입증 계획",
+    subtitle: "요건사실 ↔ 보유 증거 ↔ 부족한 증거",
+    triggers: "confidential",
+    stickiness: "thread",
+    expects: [
+      "쟁점·요건사실별 입증책임 → 보유 증거 → 부족한 증거와 확보 방법",
+      "증거의 가치 평가는 하지 않는다",
+    ],
+    form: {
+      intro: "쟁점별로 무엇을 입증해야 하고 무엇이 부족한지 표로 만듭니다.",
+      fields: [
+        { key: "have", label: "보유 증거 (선택)", placeholder: "예: 계약서, 문자 내역, 입금 기록" },
+      ],
+      build: (v) =>
+        "쟁점별 입증 계획을 세워줘.\n\n" +
+        `[보유 증거]\n${slot(v.have, "보유 증거")}\n\n` +
+        "쟁점 → 요건사실 → 입증책임(누가) → 보유 증거 → **부족한 증거와 확보 방법**(문서제출명령·" +
+        "사실조회·증인 등)을 표로 정리해줘. 증거의 증명력 평가는 하지 말고, 요건사실의 근거 " +
+        "조문을 달아줘.",
+    },
+  },
+  {
+    id: "counter_argument",
+    // 상대 서면을 쪼개면 그 안의 사실 주장·인용 조문·판례가 다음 단계 재료가 된다.
+    io: { needs: [["doc", "facts"]], yields: ["facts", "issue", "article", "precedent", "analysis"] },
+    category: "3 분석",
+    icon: "swords",
+    title: "상대방 주장 분석",
+    subtitle: "약점 · 반박 포인트 · 추가로 확인할 것",
+    triggers: "confidential",
+    stickiness: "thread",
+    expects: [
+      "주장을 쟁점별로 쪼개 ① 근거 실재 ② 논리 비약 ③ 우리가 확인할 사실 ④ 반박 근거",
+      "상대 서면의 문장을 그대로 옮기지 않는다",
+    ],
+    form: {
+      intro: "상대방 서면·주장을 붙여 넣거나 첨부하면 쟁점별 반박 포인트를 정리합니다.",
+      fields: [
+        { key: "claim", label: "상대 주장 요지 (선택)", placeholder: "첨부가 있으면 비워 두세요" },
+      ],
+      build: (v) =>
+        "상대방의 주장을 분석해줘.\n\n" +
+        `[상대 주장]\n${slot(v.claim, "상대 주장")}\n\n` +
+        "주장을 쟁점별로 쪼개고, 각각 ① 인용한 근거가 실재하고 내용이 맞는지 ② 논리 비약이나 " +
+        "빠진 요건 ③ 우리가 추가로 확인해야 할 사실 ④ 반박에 쓸 수 있는 조문·판례를 표로 " +
+        "정리해줘. 상대 서면 문장을 복사하지 말고, 확인되지 않는 것은 '확인 불가'로 남겨.",
     },
   },
   {
     id: "duty_matrix",
     io: { needs: ["subject"], yields: ["duty", "article", "sanction"] },
-    category: "의무 정리",
+    category: "3 분석",
+    icon: "fact_check",
     title: "의무 주체 · 기한 · 제재 추출",
     subtitle: "누가 · 언제까지 · 안 하면 얼마",
     expects: [
@@ -320,58 +520,60 @@ const EXPERT: Feature[] = [
     },
   },
   {
-    id: "ordinance_compare",
-    io: { needs: ["subject"], yields: ["article"] },
-    docKinds: ["ordin"],
-    category: "지역 비교",
-    title: "지자체별 조례 요건 비교",
-    subtitle: "같은 사업, 지역마다 다른 요건",
+    id: "pathway",
+    io: { needs: ["subject"], yields: ["duty", "article", "form"] },
+    category: "3 분석",
+    icon: "checklist",
+    title: "인허가·신고 의무를 단계로 분해",
+    subtitle: "무엇을 → 어디에 → 어떤 서식으로 → 언제까지",
     expects: [
-      "지역별로 요건·수수료·처리기간 차이를 표로",
-      "조례가 검색되지 않은 지역은 '확인 불가'로 명시",
+      "단계별 체크리스트(접수처 · 서식 · 기한)",
+      "단계마다 근거 조문 — 근거 없는 단계는 따로 표시",
+      "빠뜨린 단계가 눈에 보이게",
     ],
     form: {
-      intro: "조례는 지자체마다 다릅니다. 비교할 지역을 적어 주세요.",
+      intro: "대상을 적으면 그 사안의 절차를 단계로 분해합니다.",
       fields: [
-        { key: "subject", label: "사업 · 행위", placeholder: "예: 일반음식점 영업신고" },
-        { key: "regions", label: "비교할 지역", placeholder: "예: 서울 강남구, 경기 성남시, 부산 해운대구" },
+        { key: "subject", label: "대상 (사업 · 제품 · 행위)", placeholder: "예: 체외진단 의료기기 수입 / 일반음식점 개업" },
+        { key: "detail", label: "조건 (선택)", placeholder: "예: 2등급, 서울 마포구" },
       ],
       build: (v) =>
-        `같은 사업에 대해 지자체별 조례 요건을 비교해줘.\n\n[사업·행위]\n${slot(v.subject, "무엇에 대한 비교인가요")}` +
-        `\n\n[비교할 지역]\n${slot(v.regions, "지역을 적어 주세요")}\n\n` +
-        "지역 × 요건(시설·면적·첨부서류·수수료·처리기간)을 표로 만들고, 상위 법령과 " +
-        "달라지는 지점을 짚어줘. **조례가 검색되지 않은 지역은 '확인 불가'로 적고 " +
-        "다른 지역 내용을 옮겨 쓰지 마.**",
+        `${slot(v.subject, "대상")}${v.detail?.trim() ? ` (${v.detail.trim()})` : ""} 와 관련해 밟아야 하는 ` +
+        "인허가 · 신고 · 보고 의무를 단계별 절차로 분해해줘. " +
+        "각 단계마다 어디에 접수하는지, 제출할 서식, 기한을 근거 조문과 함께 정리해줘.",
     },
   },
   {
-    id: "interpretation",
-    io: { needs: [["issue", "article"]], yields: ["article"] },
-    docKinds: ["expc"],
-    category: "유권해석",
-    title: "유권해석 · 행정해석 확인",
-    subtitle: "조문만으론 안 나오는 집행 기준",
+    id: "sanction_level",
+    io: { needs: [["duty", "article", "facts"]], yields: ["sanction"] },
+    docKinds: ["admrul_attach", "prec"],
+    category: "3 분석",
+    icon: "scale",
+    title: "제재 수위 가늠",
+    subtitle: "과태료 · 영업정지 실제 수위",
     expects: [
-      "법령해석례·행정심판례에서 집행 기준 확인",
-      "해석이 갈리면 그 이유까지",
+      "법정 상한과 실제 부과 기준(별표)을 함께",
+      "감경·가중 사유와 판례상 수위",
     ],
     form: {
-      intro: "조문 문언으로 결론이 안 나는 쟁점에 씁니다.",
+      intro: "법정형과 실제 운용 기준은 다릅니다. 둘 다 봅니다.",
       fields: [
-        { key: "issue", label: "쟁점", placeholder: "예: 중개 플랫폼 입점자가 '영업자'에 해당하는지" },
-        { key: "article", label: "관련 조문 (선택)", placeholder: "예: 식품위생법 제37조" },
+        { key: "violation", label: "위반 행위", placeholder: "예: 영업신고 없이 영업" },
+        { key: "context", label: "사정 (선택)", placeholder: "예: 초범, 3개월, 자진신고" },
       ],
       build: (v) =>
-        `다음 쟁점에 관한 유권해석·행정해석을 찾아줘.\n\n[쟁점]\n${slot(v.issue, "쟁점을 적어 주세요")}` +
-        `\n\n[관련 조문]\n${slot(v.article, "조문")}\n\n` +
-        "해석기관·회신일자·결론을 표로 정리하고, 해석이 갈리는 부분이 있으면 " +
-        "무엇 때문에 갈리는지 짚어줘. 기관과 일자가 확인되지 않는 해석은 쓰지 마.",
+        `다음 위반의 제재 수위를 가늠해줘.\n\n[위반 행위]\n${slot(v.violation, "위반 행위를 적어 주세요")}` +
+        `\n\n[사정]\n${slot(v.context, "사정")}\n\n` +
+        "① 근거 조문의 법정 상한 ② 시행령·시행규칙 **별표**의 부과 기준(차수별 금액·" +
+        "정지일수) ③ 감경·가중 사유 ④ 판례에서 실제 선고된 수위를 정리해줘. " +
+        "별표가 검색되지 않으면 법정 상한만 제시하고 그렇게 밝혀줘.",
     },
   },
   {
     id: "cite_verify",
     io: { needs: [["article", "precedent"]], yields: ["article", "precedent"] },
-    category: "인용 검증",
+    category: "3 분석",
+    icon: "verified",
     title: "인용된 조문 · 판례 검증",
     subtitle: "상대방 서면 · AI 산출물의 날조 판별",
     expects: [
@@ -397,84 +599,78 @@ const EXPERT: Feature[] = [
     },
   },
   {
-    id: "sanction_level",
-    io: { needs: [["duty", "article"]], yields: ["sanction"] },
-    docKinds: ["admrul_attach", "prec"],
-    category: "제재 가늠",
-    title: "제재 수위 가늠",
-    subtitle: "과태료 · 영업정지 실제 수위",
+    id: "deadline_calendar",
+    io: { needs: [["duty", "facts", "article"]], yields: ["deadline"] },
+    docKinds: ["deadline"],
+    category: "4 산출",
+    icon: "event",
+    title: "기한·절차 일정표",
+    subtitle: "언제까지 · 누가 · 어디에 · 근거",
     expects: [
-      "법정 상한과 실제 부과 기준(별표)을 함께",
-      "감경·가중 사유와 판례상 수위",
+      "기준일부터 계산한 날짜 표 — 기한 · 행위 · 주체 · 제출처 · 근거 조문 · 계산 근거",
+      "기산점이 조문에 없으면 '기산점 확인 필요'",
+      "기한 계산은 참고용 — 초일·공휴일 규정을 반드시 확인",
     ],
     form: {
-      intro: "법정형과 실제 운용 기준은 다릅니다. 둘 다 봅니다.",
+      intro: "앞 단계의 의무·사실관계에서 기한을 뽑아 기준일 기준 일정표로 만듭니다.",
       fields: [
-        { key: "violation", label: "위반 행위", placeholder: "예: 영업신고 없이 영업" },
-        { key: "context", label: "사정 (선택)", placeholder: "예: 초범, 3개월, 자진신고" },
+        { key: "anchor", label: "기준일 (선택)", placeholder: "예: 2026-10-01 (처분 송달일)" },
       ],
       build: (v) =>
-        `다음 위반의 제재 수위를 가늠해줘.\n\n[위반 행위]\n${slot(v.violation, "위반 행위를 적어 주세요")}` +
-        `\n\n[사정]\n${slot(v.context, "사정")}\n\n` +
-        "① 근거 조문의 법정 상한 ② 시행령·시행규칙 **별표**의 부과 기준(차수별 금액·" +
-        "정지일수) ③ 감경·가중 사유 ④ 판례에서 실제 선고된 수위를 정리해줘. " +
-        "별표가 검색되지 않으면 법정 상한만 제시하고 그렇게 밝혀줘.",
+        "기한·절차 일정표를 만들어줘.\n\n" +
+        `[기준일]\n${slot(v.anchor, "기준일")}\n\n` +
+        "기준일부터 계산한 날짜 · 해야 할 행위 · 주체 · 제출처 · 근거 조문 · 기한 계산 근거(기산점·" +
+        "기간)를 표로 정리해줘. 기산점이 조문에 명시되지 않으면 '기산점 확인 필요'로 적고, " +
+        "초일 불산입·공휴일 규정이 적용되면 그 조문을 밝혀줘. 날짜를 추정해 채우지 마.",
     },
   },
   {
-    id: "pending_watch",
-    io: { needs: ["subject"], yields: ["article"] },
-    category: "개정 추적",
-    title: "개정 예정 · 시행 대기 확인",
-    subtitle: "공포됐지만 아직 시행 전인 것",
+    id: "form_find",
+    io: { needs: ["subject"], yields: ["form", "article"] },
+    category: "4 산출",
+    icon: "description",
+    title: "제출 서식·별표를 찾아 바로 작성",
+    subtitle: "서식 번호 · 근거 조문 · 첨부 서류",
     expects: [
-      "시행예정 개정본과 시행일 확인",
-      "유예기간·경과규정 정리",
-      "입법예고 단계(공포 전)는 보유하지 않음 — 그렇게 밝힌다",
+      "근거 법령에 딸린 별지 서식 번호와 조문",
+      "함께 내야 하는 첨부 서류 목록",
+      "답변의 서식 인용에서 [이 서식으로 작성]으로 바로 기입",
     ],
     form: {
-      intro:
-        "공포 후 시행 전인 개정을 찾습니다. 입법예고·국회 계류 단계 자료는 " +
-        "아직 수집 범위가 아니라, 그 구간은 확인 불가로 답합니다.",
+      intro: "무엇을 신청하는지 적으면 해당 서식을 찾아 작성 화면으로 연결합니다.",
       fields: [
-        { key: "subject", label: "대상", placeholder: "예: 식품위생법상 영업신고 의무" },
-        { key: "horizon", label: "기간 (선택)", placeholder: "예: 1년 내 시행 예정" },
+        { key: "what", label: "신청 내용", placeholder: "예: 의료기기 제조업 허가 / 옥외광고물 표시 허가" },
+        { key: "who", label: "신청인 (선택)", placeholder: "예: 법인, 수입업자" },
       ],
       build: (v) =>
-        `다음 대상에 대해 시행 예정인 개정이 있는지 확인해줘.\n\n` +
-        `[대상]\n${slot(v.subject, "대상을 적어 주세요")}\n\n[기간]\n${slot(v.horizon, "기간")}\n\n` +
-        "① 시행예정 개정본이 검색되면 현행과 무엇이 달라지는지 ② 시행일과 " +
-        "유예기간·경과규정 ③ 지금 해 둬야 할 일을 정리해줘.\n\n" +
-        "**공포 전(입법예고·국회 계류) 자료는 이 시스템이 보유하지 않는다. " +
-        "그 구간은 '확인 불가 — 입법예고 단계는 미수집'이라고 적고 추측하지 마.**",
+        `${slot(v.what, "신청 내용")}${v.who?.trim() ? ` (${v.who.trim()})` : ""} 신청에 필요한 별지 서식·별표를 찾아줘. ` +
+        "서식 번호와 근거 조문, 함께 제출할 첨부 서류 목록까지 정리해줘.",
     },
   },
   {
-    id: "impact_graph",
-    io: { needs: ["article"], yields: ["article"] },
-    docKinds: ["impact"],
-    category: "영향 분석",
-    title: "조문 개정 영향 범위",
-    subtitle: "이 조문이 바뀌면 같이 흔들리는 곳",
+    id: "client_brief",
+    io: { needs: [["analysis", "issue"]], yields: [] },
+    docKinds: ["client"],
+    category: "4 산출",
+    icon: "record_voice_over",
+    title: "의뢰인용 쉬운 설명",
+    subtitle: "결론 · 선택지 · 다음 할 일을 비전문가 문장으로",
     expects: [
-      "그 조문을 인용·준용하는 다른 조문과 하위 법령",
-      "실무에서 같이 고쳐야 할 서식·내규 지점",
+      "법률 용어를 풀어 쓰고, 선택지별 장단점·비용·기간",
+      "다음 할 일 3개",
+      "단정적 승패 예측은 하지 않는다 — 변호사가 검토·수정한 뒤 전달하는 초안",
     ],
     form: {
-      intro:
-        "한 조문을 건드렸을 때 번지는 범위를 봅니다. 조문 간 인용망 DB가 " +
-        "연결되면 더 정확해집니다(현재는 검색 기반).",
+      intro: "앞 단계의 법리 검토 결과를 의뢰인에게 설명할 문장으로 바꿉니다.",
       fields: [
-        { key: "article", label: "조문", placeholder: "예: 식품위생법 제37조" },
-        { key: "change", label: "예상 변경 (선택)", placeholder: "예: 신고 대상 업종 축소" },
+        { key: "tone", label: "형식 (선택)", placeholder: "예: 메일 / 구두 설명 / 문자" },
       ],
       build: (v) =>
-        `다음 조문이 개정되면 영향받는 범위를 분석해줘.\n\n` +
-        `[조문]\n${slot(v.article, "조문을 적어 주세요")}\n\n[예상 변경]\n${slot(v.change, "변경")}\n\n` +
-        "① 이 조문을 인용·준용하는 다른 조문(시행령·시행규칙·고시 포함) " +
-        "② 연결된 별표·서식 ③ 실무에서 같이 고쳐야 할 지점을 정리해줘. " +
-        "검색으로 확인된 것만 쓰고, 인용 관계가 확인되지 않으면 '관련 가능성' " +
-        "으로만 적어 단정하지 마.",
+        "지금까지의 검토 결과를 의뢰인에게 설명하는 글로 바꿔줘.\n\n" +
+        `[형식]\n${slot(v.tone, "형식")}\n\n` +
+        "법률 용어는 풀어 쓰고, 가능한 선택지마다 장단점·예상 비용·기간을 적고, 다음 할 일 " +
+        "3개로 끝내줘. 승패를 단정하지 말고 '~할 가능성이 있다' 수준으로, 불확실한 부분은 " +
+        "불확실하다고 써. 변호사가 검토해 전달할 초안이다.",
     },
   },
 ];
@@ -591,6 +787,7 @@ const MONITOR: Feature[] = [
   {
     id: "mon_subject",
     category: "대상 정의",
+    icon: "track_changes",
     title: "관찰할 규제 찾기",
     subtitle: "대화로 찾고 → 관찰 목록에 담기",
     expects: [
@@ -615,34 +812,86 @@ const MONITOR: Feature[] = [
     },
   },
   {
-    id: "mon_extract",
+    id: "doc_review",  // 모니터링 모드 — 관점 기본값 "규제 추출"
+    io: { needs: ["doc"], yields: ["issue", "article", "duty"] },
     category: "자료 검토",
-    title: "내부 문서에서 규제 뽑기",
-    subtitle: "계약서 · 내부 규정 · 인허가 서류 첨부",
+    icon: "attach_file",
+    stickiness: "thread",   // 첨부가 기밀을 켠다 — 역시 스레드 단위
+    title: "문서 첨부해 검토",
+    subtitle: "적합성 · 내규↔법령 갭 · 규제 추출 · 위험 조항 — 관점 선택",
     triggers: "attach",
-    stickiness: "thread",
     expects: [
-      "첨부 문서가 걸리는 규제를 짚어 줍니다",
-      "첨부 즉시 기밀 모드가 켜져 외부로 나가지 않습니다",
-      "찾은 규제를 그대로 관찰 목록에 담을 수 있습니다",
+      "관점에 따라 적합성 검토 / 내규 조항별 갭 표 / 걸리는 규제 목록 / 위험 조항 지적",
+      "첨부 즉시 기밀 모드가 켜져 외부로 나가지 않음",
+      "지적마다 근거 조문 제시",
     ],
     form: {
       intro: "파일 선택창이 열립니다. 문서를 고르면 기밀 모드가 함께 켜집니다.",
       fields: [
         {
-          key: "ask",
-          label: "무엇을 봐 드릴까요",
-          placeholder: "예: 이 계약서가 걸리는 인허가 의무",
+          key: "perspective",
+          label: "관점 (선택)",
+          placeholder: "규제 추출(기본) / 적합성 검토 / 내규↔법령 갭 / 위험 조항",
         },
+        { key: "ask", label: "특히 볼 것 (선택)", placeholder: "예: 개인정보 처리 조항이 현행법에 맞는지" },
+      ],
+      build: (v) => {
+        const p = (v.perspective ?? "").trim() || "규제 추출";
+        const ask = v.ask?.trim() ? ` 특히: ${v.ask.trim()}.` : "";
+        if (/갭|내규/.test(p)) {
+          return "첨부한 내부 규정이 현행 법령을 반영하고 있는지 점검해줘." + ask + "\n\n" +
+            "규정 조항 ↔ 근거 법령 ↔ 상태(일치·미반영·충돌·근거없음)를 표로 정리하고, " +
+            "미반영·충돌이면 고쳐야 할 문구를 제안해줘. 근거 조문을 못 찾은 항목은 " +
+            "'근거 미확인'으로 남기고 추측하지 마.";
+        }
+        if (/추출|걸리는|규제/.test(p)) {
+          return "첨부한 문서가 걸리는 법령·행정규칙·조례를 뽑아줘." + ask + "\n\n" +
+            "문서의 어느 부분이 어느 조문에 걸리는지 짝지어 표로 만들고, 각 규제가 무엇을 " +
+            "요구하는지 한 줄로 요약해줘. 근거 조문을 함께 달아줘.";
+        }
+        if (/위험|리스크/.test(p)) {
+          return "첨부한 문서에서 법적 위험이 있는 조항을 짚어줘." + ask + "\n\n" +
+            "조항별로 위험의 내용·근거 조문·완화 방안을 표로 정리해줘. 근거 없는 조항은 " +
+            "'근거 미확인'으로 남겨.";
+        }
+        return `첨부한 문서를 검토해줘.${ask || " 규제 적합성과 누락 조항을 봐줘."} ` +
+          "문제가 되는 부분은 근거 조문과 함께 짚어줘.";
+      },
+    },
+  },
+  {
+    id: "impact_graph",
+    io: { needs: ["article"], yields: ["article"] },
+    docKinds: ["impact"],
+    category: "영향 분석",
+    icon: "hub",
+    title: "조문 개정 영향 범위",
+    subtitle: "이 조문이 바뀌면 같이 흔들리는 곳",
+    expects: [
+      "그 조문을 인용·준용하는 다른 조문과 하위 법령",
+      "실무에서 같이 고쳐야 할 서식·내규 지점",
+    ],
+    form: {
+      intro:
+        "한 조문을 건드렸을 때 번지는 범위를 봅니다. 조문 간 인용망 DB가 " +
+        "연결되면 더 정확해집니다(현재는 검색 기반).",
+      fields: [
+        { key: "article", label: "조문", placeholder: "예: 식품위생법 제37조" },
+        { key: "change", label: "예상 변경 (선택)", placeholder: "예: 신고 대상 업종 축소" },
       ],
       build: (v) =>
-        `첨부한 문서를 검토해, ${slot(v.ask, "무엇을 봐 드릴까요")}. ` +
-        "관련 법령·조문을 근거와 함께 짚어줘.",
+        `다음 조문이 개정되면 영향받는 범위를 분석해줘.\n\n` +
+        `[조문]\n${slot(v.article, "조문을 적어 주세요")}\n\n[예상 변경]\n${slot(v.change, "변경")}\n\n` +
+        "① 이 조문을 인용·준용하는 다른 조문(시행령·시행규칙·고시 포함) " +
+        "② 연결된 별표·서식 ③ 실무에서 같이 고쳐야 할 지점을 정리해줘. " +
+        "검색으로 확인된 것만 쓰고, 인용 관계가 확인되지 않으면 '관련 가능성' " +
+        "으로만 적어 단정하지 마.",
     },
   },
   {
     id: "mon_watch",
     category: "변경 추적",
+    icon: "notifications_active",
     title: "관찰 목록 · 변경 확인",
     subtitle: "담은 조문 보기 · 지금 변경 확인 · 보고서",
     triggers: "watch",
@@ -660,18 +909,39 @@ const MONITOR: Feature[] = [
  */
 const BRIEF: Feature = {
   id: "brief",
-  io: { needs: ["issue", "article", "precedent"], yields: [] },
-  category: "서면 작성",
-  title: "의견서 초안 만들기",
-  subtitle: "사실관계 · 쟁점 · 검토 · 결론 골격 + 근거 목록",
+  io: { needs: [["issue", "analysis"], "article"], yields: [] },
+  category: "4 산출",
+  icon: "draft",
+  title: "서면 초안 만들기",
+  subtitle: "의견서 · 검토 보고 · 내용증명 · 답변서 · 질의서",
   triggers: "brief",
   expects: [
-    "지금까지의 대화와 그 인용으로 서면 골격 생성",
+    "지금까지의 대화와 그 인용으로 서면 골격 생성 — 종류별 구성",
     "문단을 눌러 그 문단만 고쳐 쓰기",
-    "문서에 없는 인용 번호는 자동으로 제거",
+    "연계에서는 **마지막 단계**로만 — 종합이 곧 서면의 재료",
   ],
+  form: {
+    intro: "서면 종류를 고르면 그 구성으로 초안을 엽니다. 연계의 마지막 단계로 넣을 수 있습니다.",
+    fields: [
+      { key: "kind", label: "서면 종류 (선택)", placeholder: "의견서(기본) / 검토 보고 / 내용증명 / 답변서 / 질의서" },
+    ],
+    // 패널의 '바로 실행'·연계 종점은 턴을 보내지 않고 OPEN_BRIEF_EVENT 를 쏜다(PageShell).
+    build: (v) => `서면 초안(${(v.kind ?? "").trim() || "의견서"})`,
+  },
   availableWhen: (ctx) => ctx.mode !== "public" && ctx.hasTurns,
 };
+
+export type BriefKind = "opinion" | "review" | "demand" | "answer" | "inquiry";
+
+/** 서면 종류 — 폼 입력(자유 문자열)을 백엔드 `BRIEF_KINDS` 키로. */
+export function briefKindOf(v: string | undefined): BriefKind {
+  const t = (v ?? "").trim();
+  if (/검토|보고/.test(t)) return "review";
+  if (/내용증명|통지|최고/.test(t)) return "demand";
+  if (/답변|반박|준비서면/.test(t)) return "answer";
+  if (/질의|문의/.test(t)) return "inquiry";
+  return "opinion";
+}
 
 /** 현재 상황에서 고를 수 있는 기능 — 모든 표면이 이 함수를 쓴다. */
 export function featuresFor(ctx: FeatureContext): Feature[] {
@@ -700,6 +970,6 @@ export function filterFeatures(list: Feature[], q: string): Feature[] {
   const t = q.trim().toLowerCase();
   if (!t) return list;
   return list.filter((f) =>
-    [f.title, f.subtitle, f.category].some((s) => s.toLowerCase().includes(t)),
+    [f.title, f.subtitle, f.category, ...(f.expects ?? [])].some((s) => s.toLowerCase().includes(t)),
   );
 }

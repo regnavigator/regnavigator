@@ -133,7 +133,7 @@ export function BriefPanel({ reportId, title, onClose }: Props) {
           <span className="material-symbols-outlined text-[17px] text-md-primary" aria-hidden>
             draft
           </span>
-          <h2 className="truncate text-[13.5px] font-bold">{docTitle || "의견서 초안"}</h2>
+          <h2 className="truncate text-[13.5px] font-bold">{docTitle || "서면 초안"}</h2>
         </div>
         <button
           type="button"

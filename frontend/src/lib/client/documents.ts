@@ -222,10 +222,14 @@ export type BriefDoc = {
 };
 
 /** 대화에서 서면 초안을 만든다. 조문 본문 소스가 없어도 동작한다. */
-export function createBrief(threadId: string, title?: string): Promise<BriefDoc> {
+export function createBrief(
+  threadId: string,
+  title?: string,
+  kind?: string,
+): Promise<BriefDoc> {
   return apiFetch<BriefDoc>("/documents/from-brief", {
     method: "POST",
-    body: JSON.stringify({ thread_id: threadId, title }),
+    body: JSON.stringify({ thread_id: threadId, title, kind }),
   });
 }
 

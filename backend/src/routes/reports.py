@@ -1127,8 +1127,14 @@ async def create_document_from_brief(request: Request,
     if not owner or not me or owner != me:
         raise HTTPException(status_code=403, detail="forbidden")
 
+    # 서면 종류(2026-10-06) — 의견서·검토 보고·내용증명·답변서·질의서. 모르는 값은 의견서.
+    from src.brief import BRIEF_KINDS, sections_for
+
+    kind = str(payload.get("kind") or "").strip()
+    if kind not in BRIEF_KINDS:
+        kind = "opinion"
     title = (str(payload.get("title") or "").strip()
-             or f"{meta_t.get('title') or '상담'} 의견서")
+             or f"{meta_t.get('title') or '상담'} {BRIEF_KINDS[kind]['label']}")
 
     # 대화가 모은 인용 — 번호를 그대로 이어 써야 본문의 [n] 과 맞는다.
     state = await asyncio.to_thread(get_threads_repo().get_state, thread_id)
@@ -1146,9 +1152,10 @@ async def create_document_from_brief(request: Request,
     # 대화와 인용으로 **채워진** 초안을 만든다(2026-10-02). 종전엔 골격만 줬는데
     # "그냥 서식만 나온다"는 지적을 받았다 — 맞다. 재료는 이미 이 스레드에 있다.
     if state.messages:
-        body = compose_from_thread(state.messages, cites, title=title)
+        body = compose_from_thread(state.messages, cites, title=title, kind=kind,
+                                   hidden=state.hidden)
     else:
-        body = skeleton(title)
+        body = skeleton(title, sections=sections_for(kind))
     # 면책 결정적 부착(2026-10-03) — 가장 민감한 산출물(의견서)만 면책 없이 Word 로
     # 나가고 있었다. 심층 보고서는 `report_pipeline` 이 처음부터 붙였다.
     from src.legal import append_report_disclaimer

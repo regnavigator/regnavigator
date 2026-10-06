@@ -450,3 +450,50 @@ def test_polish_route_allows_partial_success():
 
     src = inspect.getsource(R.polish_document)
     assert "skipped" in src and "out.append((title, content))" in src
+
+
+# ── 서면 종류(2026-10-06) ─────────────────────────────────────────────────────
+
+def test_brief_kinds_sections_and_fallback():
+    from src.brief import BRIEF_KINDS, sections_for, skeleton
+
+    assert set(BRIEF_KINDS) == {"opinion", "review", "demand", "answer", "inquiry"}
+    assert sections_for("answer")[0]["title"] == "상대방 주장 요지"
+    assert sections_for("nope") is sections_for("opinion")
+    s = skeleton("답변서", sections=sections_for("answer"))
+    for h in ("## 상대방 주장 요지", "## 반박", "## 근거 법령·판례", "## 결론"):
+        assert h in s
+
+
+def test_compose_from_thread_by_kind_uses_same_material():
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    from src.brief import compose_from_thread
+
+    msgs = [HumanMessage(content="상대방은 2026-03 계약이 해지됐다고 주장한다."),
+            AIMessage(content="검토 결과 " + "해지 통보가 유효하려면 서면이어야 한다. " * 6)]
+    cites = [{"number": 1, "title": "민법 제543조", "source_kind": "doc"}]
+    ans = compose_from_thread(msgs, cites, title="답변서", kind="answer")
+    assert ans.startswith("# 답변서") and "## 상대방 주장 요지" in ans and "1. 상대방은" in ans
+    assert "`[1]` 민법 제543조" in ans and "## 반박" in ans and "서면이어야" in ans
+    dem = compose_from_thread(msgs, cites, title="", kind="demand")
+    assert dem.startswith("# 내용증명") and "## 요구 사항" in dem
+    # 의견서는 종전 경로 그대로
+    op = compose_from_thread(msgs, cites, title="의견서", kind="opinion")
+    assert "## 관련 법령·조문" in op and "## 결론" in op
+
+
+def test_compose_from_thread_skips_hidden_step_turns():
+    """연계 중간 단계(hidden)는 서면 재료가 아니다 — 종합·사용자 발화만."""
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    from src.brief import compose_from_thread
+
+    msgs = [HumanMessage(content="상대방의 주장을 분석해줘. [상대 주장] 구두 해지"),
+            AIMessage(content="단계 산출 " * 20),
+            HumanMessage(content="다음 단계를 거쳤어. 종합해줘"),
+            AIMessage(content="종합: 구두 해지 통보는 " + "서면 요건을 못 갖춘다. " * 6)]
+    hidden = [True, True, False, False]
+    out = compose_from_thread(msgs, [], title="답변서", kind="answer", hidden=hidden)
+    assert "구두 해지" in out and "종합: 구두 해지" in out
+    assert "상대방의 주장을 분석해줘" not in out and "단계 산출" not in out
