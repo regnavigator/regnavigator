@@ -406,12 +406,12 @@ function PageShellInner() {
           // 턴이 **오류로** 끝났으면 멈춘다(2026-10-05 실측). 종전엔 403(동의 필요)·
           // 429 로 모든 단계가 즉시 실패해도 done 으로 찍고 빈 종합까지 보냈다 —
           // 사용자는 "답변 생성 중"만 보다가 아무 결과도 받지 못했다.
-          // `Turn.status === "error"` 는 도구 단계 하나(검색 실패 등)만 틀려도 켜진다 —
-          // 답이 나왔으면 그 턴은 성공이다. 답이 **없고** 상태 오류가 있을 때만 실패.
+          // 실패 판정(2026-10-06 정정): 스트림이 **error 이벤트로 끝났으면** 실패다 — 부분
+          // 텍스트가 스트리밍됐더라도(실측: 4천 자 나오다 400 으로 끊김) 다음 단계로 넘어가면
+          // 안 된다. `Turn.status==="error"` 만으로는 안 본다(검색 단계 하나 실패도 켜진다).
           const lastTurn = chatStateRef.current.turns.at(-1);
-          const turnFailed =
-            !lastTurn?.answer?.content?.trim() &&
-            (lastTurn?.status === "error" || !!chatStateRef.current.error);
+          const turnFailed = !!chatStateRef.current.error
+            || (lastTurn?.status === "error" && !lastTurn?.answer?.content?.trim());
           if (turnFailed) {
             toast.error("연계가 중단됐습니다", {
               description: `${f.title} 단계가 오류로 끝났습니다 — ${

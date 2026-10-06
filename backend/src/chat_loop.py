@@ -1349,6 +1349,12 @@ def _auto_continue_max() -> int:
         return 2
 
 
+def _is_prefill_unsupported(e: BaseException) -> bool:
+    """Anthropic 400 'This model does not support assistant message prefill'."""
+    msg = str(getattr(e, "message", None) or e)
+    return "prefill" in msg and ("not support" in msg or "unsupported" in msg)
+
+
 async def _stream_model(model, messages, config, emit) -> AIMessage:
     full = await _stream_one(model, messages, config, emit)
     # 연장분 토큰은 첫 스트림이 쓴 것과 **같은 값**으로 emit (None 포함) —
@@ -1374,9 +1380,21 @@ async def _stream_model(model, messages, config, emit) -> AIMessage:
                   n, _auto_continue_max(), len(text))
         # ⚠️ Anthropic prefill 규약: 마지막 assistant 내용이 공백으로 끝나면 400.
         prefill = AIMessage(content=text.rstrip())
-        cont = await _stream_one(
-            model, list(messages) + [prefill], config, emit,
-            message_id=stream_mid)
+        try:
+            cont = await _stream_one(
+                model, list(messages) + [prefill], config, emit,
+                message_id=stream_mid)
+        except Exception as e:  # noqa: BLE001
+            # 프리필 자체를 거부하는 모델(2026-10-06 실측: 400 "does not support assistant
+            # message prefill"). 종전엔 이 예외가 턴 전체를 "일시적인 오류"로 끝내 **이미
+            # 스트리밍된 4천 자가 버려졌다**. 연장은 포기하고 부분 답변을 truncated 로 확정
+            # — FE 가 [이어서 작성] 버튼을 띄운다(사용자 재요청은 새 human 턴이라 프리필 아님).
+            if _is_prefill_unsupported(e):
+                _log.warning("auto-continue 중단 — 모델이 prefill 미지원(%s). 부분 답변 %d자 유지",
+                             type(e).__name__, len(text))
+                meta["stop_reason"] = "max_tokens"
+                break
+            raise
         cont_text = _chunk_text(cont)
         if not cont_text:
             break

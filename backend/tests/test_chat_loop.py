@@ -523,3 +523,52 @@ def test_threads_repo_merge_semantics(threads_repo):
     assert threads_repo.get_state("t6").selected_law_keys == ["a", "b"]
     threads_repo.set_selected_law_keys("t6", [])
     assert threads_repo.get_state("t6").selected_law_keys == []
+
+
+# ── 자동 이어쓰기: 프리필 미지원 모델 (2026-10-06 실측 400) ───────────────────
+
+def test_auto_continue_keeps_partial_when_prefill_rejected(monkeypatch):
+    """연장 요청이 'does not support assistant message prefill' 400 이면 턴을 죽이지
+    않고 부분 답변을 truncated 로 확정한다(종전: 4천 자 스트리밍분이 버려짐)."""
+    import asyncio
+
+    from langchain_core.messages import AIMessageChunk
+
+    from src import chat_loop as CL
+
+    calls = []
+
+    async def fake_stream_one(model, messages, config, emit, *, message_id=None):
+        calls.append(len(messages))
+        if len(calls) == 1:
+            return AIMessageChunk(content="부분 답변 " * 10, id="m1",
+                                  response_metadata={"stop_reason": "max_tokens"})
+        class _E(Exception):
+            message = ("Error code: 400 - {'type': 'error', 'error': {'type': "
+                       "'invalid_request_error', 'message': 'This model does not support "
+                       "assistant message prefill.'}}")
+        raise _E(_E.message)
+
+    monkeypatch.setattr(CL, "_stream_one", fake_stream_one)
+    monkeypatch.setenv("CHAT_AUTO_CONTINUE_MAX", "2")
+    ai = asyncio.run(CL._stream_model(object(), [], None, lambda ev: None))
+    assert "부분 답변" in ai.content
+    assert ai.response_metadata.get("truncated") is True
+    assert len(calls) == 2  # 연장 1회 시도 후 중단(재시도 안 함)
+
+
+def test_auto_continue_reraises_other_errors(monkeypatch):
+    import asyncio
+
+    from langchain_core.messages import AIMessageChunk
+
+    from src import chat_loop as CL
+
+    async def fake_stream_one(model, messages, config, emit, *, message_id=None):
+        if len(messages) == 0:
+            return AIMessageChunk(content="x", id="m1", response_metadata={"stop_reason": "max_tokens"})
+        raise RuntimeError("network down")
+
+    monkeypatch.setattr(CL, "_stream_one", fake_stream_one)
+    with __import__("pytest").raises(RuntimeError):
+        asyncio.run(CL._stream_model(object(), [], None, lambda ev: None))
