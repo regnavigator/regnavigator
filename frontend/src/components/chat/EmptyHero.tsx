@@ -56,7 +56,7 @@ export function EmptyHero({ configured, onPickPrompt, templates, presets, onPick
     return null;
   }, [session]);
 
-  const { mode, showPro } = useMode();
+  const { mode, showPro, ready } = useMode();
   // 카드 정의는 레지스트리가 단일 출처 — 스레드 내 피커와 같은 목록을 쓴다.
   const features = useMemo(() => {
     const base = featuresFor({ mode, hasTurns: false });
@@ -102,6 +102,22 @@ export function EmptyHero({ configured, onPickPrompt, templates, presets, onPick
         <p className="text-body-base text-md-on-surface-variant">
           먼저 설정에서 배포 URL과 Assistant ID를 입력하세요.
         </p>
+      </div>
+    );
+  }
+
+  // 모드가 아직 안 읽혔으면(SSR 첫 페인트 → localStorage 전) 아무것도 그리지 않는다
+  // (2026-10-06 실측: 모니터링 모드인데 새로고침마다 전문가 타일이 잠깐 보였다 사라짐 —
+  // 옛 코드가 아니라 `mode===null` 구간에 기본 분기가 그려진 것). 인사만 두고 본문은 비운다.
+  if (!ready) {
+    return (
+      <div className="relative flex flex-col items-center gap-8 px-4" aria-busy="true">
+        <div className="max-w-[560px] text-center">
+          <h1 className="text-[26px] font-semibold leading-[1.2] text-md-on-surface sm:text-[30px]"
+              style={{ letterSpacing: "-0.02em" }}>
+            {greeting}
+          </h1>
+        </div>
       </div>
     );
   }
