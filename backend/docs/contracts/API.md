@@ -693,6 +693,12 @@ GET /law-graph?keys=006364_000100,001275_000700&depth=1&rels=CITES&per_node_cap=
 `PATCH /chat/{tid}/workflow` 는 같은 날부터 **아직 없는 스레드를 호출자 소유로 만들어 받는다**
 (첫 화면에서 직무를 골라 복원할 때 서버 스레드가 아직 없다).
 
+**검색 종별은 서버가 진실원이다(2026-10-06).** backend 는 기동 후 첫 검색 때 검색 API `GET /search/health` 를
+읽어 지금 서빙 중인 종별(law 엔진 5종 + 살아 있는 DocChunk 엔진 guide·admrul_attach·addendum)을 알아내고
+10분 캐시한다(`search_api_client.available_target_types`). 기본 검색엔 law 엔진 5종만 넣고 DocChunk 엔진은
+LLM `doc_kinds` 선택 때만 쓴다. 법령 개정 상태는 `POST /openlaw/amendment-status`(`amendment_status()`) 로
+서버 판정(current·repealed·pending)을 받을 수 있다 — 현행본 고지의 보조 근거.
+
 `POST /documents/from-brief` 는 `kind`(`opinion`(기본)·`review`·`demand`·`answer`·`inquiry`, 10-06)를 받아
 그 종류의 골격(`src/brief.BRIEF_KINDS`)으로 초안을 만든다. 숨은 턴(연계 중간 단계)은 재료에서 뺀다.
 

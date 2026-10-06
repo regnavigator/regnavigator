@@ -11,7 +11,8 @@ env:
 - RAG_SEARCH_API_URL   : 베이스 URL (예: http://192.0.2.10:8080). 미설정 시 검색 불가.
 - RAG_SEARCH_API_KEY   : X-API-Key.
 - RAG_SEARCH_TIMEOUT_S : 요청 타임아웃 초 (기본 20 — 리랭커 GPU 콜드 대비).
-- RAG_SEARCH_TARGET_TYPES : 기본 종별 CSV (미설정 시 서버 기본 = 법령류).
+- RAG_SEARCH_TARGET_TYPES : 기본 종별 CSV. **미설정 시 서버가 지금 서빙하는 종별을 조회해 쓴다**
+                            (`available_target_types()`, 2026-10-06) — 그마저 실패하면 코드 기본값.
 """
 
 from __future__ import annotations
@@ -276,16 +277,95 @@ def ping() -> tuple[bool, str | None]:
         return False, f"{type(e).__name__}"
 
 
-# 기본 검색 종별 — 법령류 + 판례(prec)·법령해석례(expc). openlaw-etl 코퍼스가
-# 5종(law/admrul/prec/expc/ordin) 전부 인덱싱하며, 해석례는 "의료기기 해당 여부"
-# 같은 유권해석 질의에 핵심(RA/QA 실무). 검색 서버 RRF+리랭커가 법령을 우선
-# 랭킹하므로 조문 질의 희석 낮음(실측: 판례 포함해도 top-k 다수가 법령).
-# `RAG_SEARCH_TARGET_TYPES` env 로 재정의 가능.
+# 기본 검색 종별 — 법령류 + 판례(prec)·법령해석례(expc). 검색 서버 RRF+리랭커가 법령을
+# 우선 랭킹하므로 조문 질의 희석 낮음(실측: 판례 포함해도 top-k 다수가 법령).
+# **코드 기본값은 폴백일 뿐이다**(2026-10-06): 서버가 지금 서빙하는 종별을 조회해 쓴다.
 _DEFAULT_TARGET_TYPES = ["law", "admrul", "ordin", "prec", "expc"]
+
+#: law 엔진(최상위 Qdrant 컬렉션)이 함께 색인하는 종별 — 서버 `SearchRequest.target_types`
+#: 설명·`SearchHitOut.target_type` 어휘. health 에 별도 키가 없어 law 엔진이 살아 있으면
+#: 이 다섯이 전부 있다고 본다(ETL 이 5종을 한 컬렉션에 넣는다).
+_LAW_ENGINE_TYPES = ["law", "admrul", "ordin", "prec", "expc"]
+#: DocChunk 서브엔진 — health 에 **같은 이름의 키**로 상태가 온다.
+_DOC_ENGINE_TYPES = ["guide", "admrul_attach", "addendum"]
+
+_TT_CACHE: dict[str, Any] = {"at": 0.0, "value": None}
+_TT_TTL_S = 600.0
+
+
+def _probe_target_types() -> list[str] | None:
+    """`GET /search/health` 로 **지금 서빙 중인** 종별을 알아낸다.
+
+    law 엔진은 최상위 `qdrant_points>0`·`reranker_loaded`. DocChunk 엔진은 같은 이름의
+    하위 dict 에 `qdrant_points>0` 이면 서빙 중(bm25 는 지연 로드라 보지 않는다).
+    실패·형태 불일치면 None(호출자가 폴백).
+    """
+    if not is_available():
+        return None
+    import httpx
+
+    try:
+        r = _client().get(f"{_base_url()}/search/health",
+                          headers={"X-API-Key": _api_key()})
+        r.raise_for_status()
+        h = r.json()
+    except (httpx.HTTPError, ValueError):
+        return None
+    if not isinstance(h, dict) or not int(h.get("qdrant_points") or 0):
+        return None
+    out = list(_LAW_ENGINE_TYPES)
+    for t in _DOC_ENGINE_TYPES:
+        sub = h.get(t)
+        if isinstance(sub, dict) and int(sub.get("qdrant_points") or 0) > 0 \
+                and sub.get("reranker_loaded"):
+            out.append(t)
+    return out
+
+
+def available_target_types(*, refresh: bool = False) -> list[str]:
+    """서버가 지금 서빙하는 종별(10분 캐시). 조회 실패면 코드 기본값.
+
+    `RAG_SEARCH_TARGET_TYPES` 가 있으면 그것이 최우선(운영자가 일부러 좁힌 것).
+    """
+    import time as _t
+
+    raw = (os.getenv("RAG_SEARCH_TARGET_TYPES") or "").strip()
+    if raw:
+        return [t.strip() for t in raw.split(",") if t.strip()]
+    now = _t.monotonic()
+    if not refresh and _TT_CACHE["value"] and now - _TT_CACHE["at"] < _TT_TTL_S:
+        return list(_TT_CACHE["value"])
+    probed = _probe_target_types()
+    if probed:
+        _TT_CACHE.update(at=now, value=probed)
+        return list(probed)
+    return list(_TT_CACHE["value"] or _DEFAULT_TARGET_TYPES)
 
 
 def _default_target_types() -> list[str] | None:
-    raw = (os.getenv("RAG_SEARCH_TARGET_TYPES") or "").strip()
-    if not raw:
-        return list(_DEFAULT_TARGET_TYPES)
-    return [t.strip() for t in raw.split(",") if t.strip()]
+    """검색 기본 종별 — 서빙 중인 종별 중 **검색 기본에 넣는 것**(law 엔진 5종).
+
+    DocChunk 엔진(guide·admrul_attach·addendum)은 서빙 중이어도 기본에 넣지 않는다 —
+    LLM 이 `doc_kinds` 로 고를 때만(가이드라인 질의 등). 기본에 섞으면 조문 질의가 희석된다.
+    """
+    avail = available_target_types()
+    base = [t for t in _LAW_ENGINE_TYPES if t in avail]
+    return base or list(_DEFAULT_TARGET_TYPES)
+
+
+def amendment_status(law_ids: list[str]) -> dict[str, str]:
+    """`POST /openlaw/amendment-status` — law_id → current·repealed·pending… (2026-10-06).
+
+    "현행본 미보유" 고지(`legal.pending_only_laws`)는 턴의 인용 상태로 판정하는데, 이 API 는
+    법령 단위의 **서버 판정**을 준다. 판정 전 법령은 응답에 없다. 실패하면 빈 dict.
+    """
+    ids = [str(x).strip() for x in dict.fromkeys(law_ids or []) if str(x).strip()]
+    if not ids or not is_available():
+        return {}
+    try:
+        out = _post("/openlaw/amendment-status", {"law_ids": ids[:200]})
+    except SearchApiError as e:
+        _log.info("amendment-status 실패(무시): %s", e)
+        return {}
+    st = out.get("status") if isinstance(out, dict) else None
+    return {str(k): str(v) for k, v in (st or {}).items()} if isinstance(st, dict) else {}

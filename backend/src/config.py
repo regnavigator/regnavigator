@@ -130,7 +130,9 @@ ENV_REGISTRY: tuple[Setting, ...] = (
     Setting("RAG_SEARCH_API_KEY", None, "search", "검색 API X-API-Key",
             prod_required=True, secret=True),
     Setting("RAG_SEARCH_TIMEOUT_S", "20", "search", "검색 API 타임아웃(리랭커 콜드 대비)"),
-    Setting("RAG_SEARCH_TARGET_TYPES", None, "search", "검색 종별 CSV 재정의(미설정=law,admrul,ordin,prec,expc — 법령+판례+해석례)"),
+    Setting("RAG_SEARCH_TARGET_TYPES", None, "search",
+            "검색 종별 CSV 재정의. **미설정(권장)이면 서버 GET /search/health 로 지금 서빙 중인 종별을 "
+            "조회해 쓴다**(10분 캐시, 실패 시 law,admrul,ordin,prec,expc 폴백). 운영자가 일부러 좁힐 때만"),
     Setting("SEARCH_MAX_CONCURRENCY", "2", "search", "동시 /search 호출 상한(백프레셔 — GPU thrash 방지)"),
     Setting("SEARCH_WAIT_TIMEOUT_S", "30", "search",
             "검색 슬롯 대기 상한(초). 초과 시 거절 — 무한 대기가 스레드풀을 고갈시켜 전 요청을 멈추던 것 차단"),

@@ -80,6 +80,11 @@ MEDIREG AI 는 의사·RA/QA·인허가 컨설턴트를 위한 **한국어 의�
   fallback "식약처 공식 채널" → "소관 기관 공식 채널"(v34).
 - **첫 화면 기능을 3×3 타일로** (10-05, front): 세로 목록은 아래쪽 기능이 스크롤 밖이고 몇 개인지 가늠이
   안 됐다 → 9개/페이지 타일, 가로 스냅 스크롤 + 화살표 + 점. 좁은 화면은 2열.
+- **검색 종별을 서버 최신 목록으로** (10-06, back): `RAG_SEARCH_TARGET_TYPES` 미설정이면 하드코딩 대신 검색 API
+  `GET /search/health` 로 서빙 중인 종별을 조회(10분 캐시, 실패 시 코드 기본값·마지막 성공값). 실측 6종
+  (law·admrul·ordin·prec·expc·guide). `POST /openlaw/amendment-status` 클라이언트 추가(법령별 current/pending
+  서버 판정). dev `.env` 정리: 평문 시크릿 주석 삭제, SMTP_* 5개 중복 제거(EMAIL_SERVER 가 우선), 발신자명
+  정정, dev 전용 노브 분리, JUDGE_* 추가.
 - **기능 카탈로그 재편 15 → 20 · 업무 단계 4** (10-06, front/back): 기능이 검색 종별(판례·조례·해석례…)로
   쪼개져 있어 "사실관계 → 쟁점 → 법리 → 서면" 흐름의 입구·출구가 없었다. 카테고리를 `1 파악 · 2 조사 ·
   3 분석 · 4 산출`(번호 = 순서)로 통일하고 기능별 아이콘(`Feature.icon`). 합병 3(`pending_watch`→`article_diff`
