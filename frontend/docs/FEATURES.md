@@ -379,6 +379,25 @@ Jev) → ③ `aux_model()` LLM 폴백. 기밀 턴은 ①만. 지금은 `/workflo
 출처: `docs/Vibe_Coding_Agent_Master_Prompt.docx` 선별 적용(대조표 `docs/CHANGELOG.md` 2026-10).
 채택하지 않은 것: 분기 DAG · 실패 시 자동 우회 실행 · 비용·실패확률 사전 시뮬레이션 · Redis.
 
+## 11-c. 규제 모니터링 — 대상 대시보드 (2026-10-06)
+
+모니터링 모드의 첫 화면은 기능 타일이 아니라 **대상 대시보드**다(`components/monitor/MonitorDashboard.tsx`).
+
+- **카드** = 모니터링 스레드(`kind='monitor'`) 하나. 관찰 수 · 변경 수 · 미확인 배지 · 폐지/개정/시행예정 칩 ·
+  최근 변경 1줄 · 마지막 확인 시각. `TilePager`(3×3 가로 페이징, `FeatureCards` 와 공용) 로 넘긴다.
+- **정렬** `lib/monitor/dashboard.ts` `sortTargets`: 미읽음 → 변경 수 → 최근 변경 시각 → 관찰 수 → 최근 갱신.
+- **인사 자리 현황** `overview`: "확인 안 한 변경 — 대상 n · 조문 m건". "변경"은 **미처리 누적**(미읽음·미해제).
+  **처리 = 그 스레드의 변경 보고서 작성**(`POST /monitor/threads/{tid}/report` 가 읽음 처리) — 열람·패널
+  열기로는 줄지 않는다(사용자 결정).
+- 카드 클릭 → `/new?threadId=…`. "+ 모니터링 대상 추가" 카드는 **이름 필수**(백엔드 422). 사이드바 `+` 도 같다.
+- **스레드 안** 입력창 밑은 두 버튼만: "관찰 목록 · 변경 확인"(미확인 배지, `WatchPanel`) + "조문 개정 영향
+  범위"(`impact_graph` 기능을 관찰 조문 기본값으로 바로 실행 → 기능 카드 턴). 기밀·서면·심층보고서·기능연계는
+  모니터 스레드에서 숨김, 첨부는 유지.
+- `/alerts` 사이드바 아이콘 제거(페이지는 남음). 폴더형 `/monitor`(정기 리포트 배송)는 그대로.
+- 백엔드: `GET /monitor/threads` 에 `changed_count·kinds·latest_alert·last_checked_at`,
+  `chat_threads.monitor_checked_at`(변경 0건이어도 점검 기록). 카탈로그 `MONITOR` 목록은 코드에 남아 있으나
+  첫 화면에 노출하지 않는다.
+
 ## 12. 알려진 한계 / TODO
 
 - mock 모드에서 답변 본문은 fixture 정적 — 어떤 질문에도 같은 답변
