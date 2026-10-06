@@ -361,6 +361,8 @@ export function deriveTurns(
       // 조합의 중간 단계(2026-10-02) — human 메시지에 표시가 붙어 오면 턴 전체를
       // 숨긴다. 기본 목록에서 빠지고 "과정 보기"로만 펼쳐진다.
       hidden: human.hidden || undefined,
+      // 기능 턴 메타(2026-10-06) — 말풍선 대신 기능 카드/보고서 절로 렌더.
+      feature: human.feature,
       started_at: startedAt,
       ended_at: ended_at_value,
       steps: turnSteps,

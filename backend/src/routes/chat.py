@@ -77,6 +77,39 @@ def _max_input_chars() -> int:
         return 32000
 
 
+class ChatFeatureRun(BaseModel):
+    """연계 실행 1회 안에서의 위치 — 프런트가 턴들을 하나의 보고서 뷰로 묶는 열쇠."""
+    id: str = Field(min_length=1, max_length=64)
+    index: int = Field(ge=0, le=64)
+    total: int = Field(ge=1, le=64)
+    name: str | None = Field(default=None, max_length=120)
+
+
+class ChatFeatureMeta(BaseModel):
+    """기능 카드로 보낸 턴의 **렌더 메타**(2026-10-06).
+
+    프롬프트 전문을 말풍선에 그대로 보여 주지 않으려면 프런트가 "어느 기능, 어떤 입력값"
+    인지를 알아야 한다. 모델 입력엔 들어가지 않는다 — `HumanMessage.additional_kwargs`
+    에만 저장되고 `langchain_anthropic` 변환이 그 필드를 버린다(실측).
+    """
+    id: str = Field(min_length=1, max_length=64)
+    title: str = Field(min_length=1, max_length=120)
+    icon: str | None = Field(default=None, max_length=40)
+    values: dict[str, str] = Field(default_factory=dict)
+    run: ChatFeatureRun | None = None
+
+    def as_stored(self) -> dict:
+        """저장용 — 빈 값·과한 길이는 버린다(사실관계가 들어올 수 있어 상한을 둔다)."""
+        vals = {str(k)[:64]: str(v)[:4000] for k, v in list(self.values.items())[:20]
+                if str(v or "").strip()}
+        out: dict = {"id": self.id, "title": self.title, "values": vals}
+        if self.icon:
+            out["icon"] = self.icon
+        if self.run:
+            out["run"] = self.run.model_dump(exclude_none=True)
+        return out
+
+
 class ChatAttachment(BaseModel):
     """첨부 문서 — /files/extract 가 돌려준 추출 텍스트를 프런트가 되보낸다.
 
@@ -112,6 +145,8 @@ class ChatRequest(BaseModel):
     # `doc_kinds=["prec"]` 를 평문으로 박았다 — 내부 파라미터가 노출되고, 사용자가
     # 지우면 기능이 조용히 달라졌다. 구조화 필드로 받아 턴의 기본 종별로 쓴다.
     doc_kinds: list[str] | None = None
+    # 기능 턴 렌더 메타(2026-10-06) — 어느 기능·입력값·연계 위치. 모델 입력 아님.
+    feature: ChatFeatureMeta | None = None
 
 
 def _max_attachments() -> int:
@@ -264,6 +299,7 @@ async def chat(req: ChatRequest, request: Request):
                 hidden=hidden,
                 skill_hint=req.skill_hint if req.skill_hint == "irb_drb" else None,
                 doc_kinds=req.doc_kinds,
+                feature=req.feature.as_stored() if req.feature else None,
             ).__aiter__()
             while True:
                 nxt = asyncio.ensure_future(agen.__anext__())
@@ -354,6 +390,9 @@ def _message_view(m, *, hidden: bool = False) -> dict:
         out["kind"] = ak["kind"]
         if ak.get("report_id"):
             out["report_id"] = ak["report_id"]
+    # 기능 턴 메타(2026-10-06) — 프런트가 말풍선 대신 기능 카드 / 보고서 절로 렌더.
+    if isinstance(ak.get("feature"), dict):
+        out["feature"] = ak["feature"]
     # 길이 상한 잘림 — 새로고침·재진입 후에도 [이어서 작성] 버튼이 뜨게 영속 메타에서
     # 복원(종전엔 SSE done 에만 실려 라이브 세션 전용, 2026-09-15). 자동 이어쓰기
     # 이전에 저장된 메시지는 truncated 키가 없어 stop_reason 으로 판정.

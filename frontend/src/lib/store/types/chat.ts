@@ -112,6 +112,22 @@ export type Message = {
   /** 기능 조합의 중간 단계(2026-10-02) — 기본 렌더에서 빠지고 "과정 보기"로만
    *  펼쳐진다. 모델 컨텍스트에는 들어가 있다(숨김은 렌더 계층의 일). */
   hidden?: boolean;
+  /** 기능 턴 렌더 메타(2026-10-06) — 어느 기능·입력값·연계 위치. 모델 입력엔 없다. */
+  feature?: FeatureMeta;
+};
+
+/**
+ * 기능 카드로 보낸 턴의 렌더 메타(2026-10-06). 프롬프트 전문 대신 "기능 제목 + 입력값"
+ * 을 보여 주고, `run` 이 있으면 같은 run 의 턴들을 **보고서 뷰** 한 개로 묶는다.
+ */
+export type FeatureMeta = {
+  id: string;
+  title: string;
+  icon?: string;
+  /** 사용자가 적은 값만(빈 칸 제외) */
+  values: Record<string, string>;
+  /** 연계 실행 1회 안에서의 위치. 없으면 단일 실행 */
+  run?: { id: string; index: number; total: number; name?: string };
 };
 
 /* ─────────────────── front-derived Turn (03 §2.2) ─────────────────── */
@@ -123,8 +139,10 @@ export type Turn = {
   status: "running" | "done" | "error" | "interrupted";
   /** "report_overview" — 보고서 완료 개요 전용 턴(사용자 말풍선 없음, 완료 카드 렌더) */
   kind?: "report_overview";
-  /** 조합의 중간 단계 턴 — 기본 목록에서 숨긴다. 마지막 종합만 보인다. */
+  /** 조합의 중간 단계 턴 — 옛 스레드(2026-10-02~05) 호환. 새 연계는 숨기지 않는다. */
   hidden?: boolean;
+  /** 기능 턴 메타(2026-10-06) — 있으면 말풍선 대신 기능 카드/보고서 절로 렌더 */
+  feature?: FeatureMeta;
   /** ms epoch */
   started_at: number;
   ended_at?: number;

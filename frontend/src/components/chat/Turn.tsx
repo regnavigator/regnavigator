@@ -11,6 +11,7 @@
 
 import { useMemo, type ReactNode } from "react";
 import { UserMessage } from "@/components/chat/UserMessage";
+import { FeatureMessage } from "@/components/chat/FeatureMessage";
 import { StepCarousel } from "@/components/chat/StepCarousel";
 import { LiveSearchGlass } from "@/components/chat/LiveSearchGlass";
 import { TurnAnswer } from "@/components/chat/TurnAnswer";
@@ -24,6 +25,11 @@ import type { Turn as TurnType } from "@/lib/store/types";
 
 type Props = {
   turn: TurnType;
+  /**
+   * 보고서 절 모드(2026-10-06) — `RunReport` 안에서 그릴 때. 사용자 말풍선 대신 입력
+   * 한 줄, 후속 질문 카드 없음(절마다 제안이 붙으면 보고서가 아니다).
+   */
+  sectionMode?: boolean;
   /** `kind:"chat"` 후속 질문 카드 클릭 시 — host가 ChatInput prefill 결정 */
   onPickNextStep?: (prompt: string) => void;
   /**
@@ -67,6 +73,7 @@ type Props = {
 
 export function Turn({
   turn,
+  sectionMode = false,
   onPickNextStep,
   workflowSlot,
   onTriggerReport,
@@ -101,6 +108,7 @@ export function Turn({
   const clean = stripVerdictMarker(parsed.clean);
   const items = parsed.items;
   const showNextSteps =
+    !sectionMode &&
     turn.status === "done" &&
     !streamingActive &&
     items.length > 0 &&
@@ -141,7 +149,16 @@ export function Turn({
 
   return (
     <article aria-label={`Turn ${turn.id}`} className="flex flex-col gap-stack-gap">
-      <UserMessage content={turn.user_message.content} />
+      {turn.feature ? (
+        // 기능 턴(2026-10-06) — 프롬프트 전문 대신 기능 제목 + 입력값. 원문은 접힘.
+        <FeatureMessage
+          feature={turn.feature}
+          content={turn.user_message.content}
+          variant={sectionMode ? "section" : "bubble"}
+        />
+      ) : (
+        <UserMessage content={turn.user_message.content} />
+      )}
 
       {isWaitingFirstChunk ? (
         <div

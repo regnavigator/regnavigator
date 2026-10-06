@@ -21,6 +21,8 @@ import { ChatInput } from "@/components/chat/ChatInput";
 import { withViewTransitionAsync } from "@/lib/viewTransition";
 import { ChatScroll } from "@/components/chat/ChatScroll";
 import { Turn as TurnView } from "@/components/chat/Turn";
+import { RunReport } from "@/components/chat/RunReport";
+import { groupRuns } from "@/lib/features/groupRuns";
 import { EmptyHero } from "@/components/chat/EmptyHero";
 import { ThreadTitleHeader } from "@/components/chat/ThreadTitleHeader";
 import { NotificationBell } from "@/components/shell/NotificationBell";
@@ -84,9 +86,9 @@ import {
   type CompositionStep,
   saveComposition,
   fromTemplate,
+  featureMeta,
   stepMessage,
   suggestValues,
-  synthesisMessage,
   toTemplateSteps,
 } from "@/lib/features/composition";
 
@@ -186,7 +188,7 @@ function PageShellInner() {
     async (t: { steps: TaskTemplate["steps"] }, tid: string) => {
       const all = featuresFor({ mode, hasTurns: true });
       const byId = new Map(all.map((f) => [f.id, f]));
-      const { composition: c, dropped } = fromTemplate(t.steps, byId);
+      const { composition: c, dropped } = fromTemplate(t.steps, byId, (t as { name?: string }).name);
       if (dropped.length) {
         toast.warning("일부 단계를 불러오지 못했습니다", {
           description: `지금은 없는 기능: ${dropped.join(", ")}`,
@@ -296,6 +298,7 @@ function PageShellInner() {
         confidential: st.confidential,
         workflowFileIds: st.files.map((x) => x.id),
         docKinds: f.docKinds,
+        feature: featureMeta(f, st),
       });
     },
     [chat, mode, threadId],
@@ -345,17 +348,18 @@ function PageShellInner() {
       }
 
       setComposing(true);
-      // 연계가 도는 동안은 단계 턴을 **보이게** 한다(2026-10-05 지적: "프롬프트가
-      // 채팅창에 나오지도 않고 답변 생성 중이라고만 나와 순차로 도는지 알 수 없다").
-      // 끝나면 "과정 숨기기"로 접을 수 있다.
       stopRef.current = false;
       const fromConversation = chat.state.turns.length > 0;
+      // 연계 실행 1회 id(2026-10-06) — 같은 run 의 턴을 프런트가 보고서 한 편으로 묶는다.
+      // 이어 돌리기(단계별 모드)면 저장된 run id 를 쓴다.
+      const runId = c.runId ?? `run_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+      const runName = c.name;
       const restart = c.status === "done" || c.cursor >= c.steps.length;
       let cur = restart ? 0 : c.cursor;
       let steps = restart ? c.steps.map((x) => ({ ...x, done: false })) : c.steps.slice();
       // 패널의 ✓·"연계 n/n" 이 돌기 시작하자마자 풀리도록 먼저 저장한다(2026-10-05 실측:
       // 재실행 중에도 전 단계가 ✓ 로 보였다).
-      await persistComposition({ ...c, steps, cursor: cur, mode: runMode, status: "running" });
+      await persistComposition({ ...c, steps, cursor: cur, mode: runMode, status: "running", runId, name: runName });
 
       try {
         while (cur < steps.length) {
@@ -379,12 +383,13 @@ function PageShellInner() {
             continue;
           }
 
-          // 단계 = 숨은 턴. 기밀은 **이 단계의 값**을 쓴다(전역 토글 아님).
+          // 단계 = **보이는** 턴(2026-10-06 — 숨은 턴 + 종합은 단계 답변을 다 날렸다).
+          // 보고서 절로 묶이도록 run 메타를 싣는다. 기밀은 **이 단계의 값**(전역 토글 아님).
           await chat.send(stepMessage(f, st, cur, { fromConversation }), {
-            hidden: true,
             confidential: st.confidential,
             workflowFileIds: st.files.map((x) => x.id),
             docKinds: f.docKinds,
+            feature: featureMeta(f, st, { id: runId, index: cur, total: steps.length, name: runName }),
           });
           const ok = await waitIdle();
           if (!ok) {
@@ -414,7 +419,7 @@ function PageShellInner() {
               } 해결한 뒤 다시 실행하면 이 단계부터 이어집니다.`,
               duration: 12000,
             });
-            await persistComposition({ ...c, steps, cursor: cur, mode: runMode, status: "running" });
+            await persistComposition({ ...c, steps, cursor: cur, mode: runMode, status: "running", runId, name: runName });
             return;
           }
 
@@ -445,32 +450,11 @@ function PageShellInner() {
           }
         }
 
-        // 종합 — 이것만 화면에 보인다. 실제로 돈 단계가 없으면 종합도 없다.
-        const titles = steps
-          .filter((x) => x.done)
-          .map((x) => byId.get(x.fn)?.title)
-          .filter((t): t is string => !!t);
-        if (!stopRef.current && cur >= steps.length && titles.length > 0) {
-          // 기밀 단계가 하나라도 있었으면 종합도 원내에서 한다 — 종합은 그
-          // 내용을 읽어야 하므로, 상용으로 보내면 격리가 여기서 무너진다.
-          const anyConf = steps.some((x) => x.confidential);
-          await chat.send(synthesisMessage(titles), { confidential: anyConf });
-          // 종점 기능(2026-10-06) — 마지막 단계가 서면이면 종합을 재료로 모달을 연다.
-          // 서식이면 패널의 서식 목록을 펼친다(CompositionPanel 이 이벤트를 받는다).
-          const last = steps.at(-1);
-          const lastF = last ? byId.get(last.fn) : undefined;
-          if (lastF?.triggers === "brief") {
-            if (await waitIdle()) {
-              window.dispatchEvent(new CustomEvent(OPEN_BRIEF_EVENT, {
-                detail: { kind: briefKindOf(last!.values.kind) },
-              }));
-            }
-          } else if (lastF?.id === "form_find") {
-            window.dispatchEvent(new Event(OPEN_FORM_LIST_EVENT));
-          }
-          // 끝난 연계는 **비운다**(2026-10-06 지적: "사용하고 나면 없어져야"). 남겨 두면
-          // 다음 연계를 짤 때 섞이고, 종합이 이미 대화에 있으니 다시 볼 이유도 없다.
-          // 단계별 모드로 중간에 멈춘 것·오류로 멈춘 것만 남는다(이어 돌려야 하므로).
+        // 종합 턴 없음(2026-10-06): 단계 답변 자체가 보고서 본문이다. 종점 기능(서면·서식)은
+        // 보고서 뷰 하단 버튼이 담당 — 사용자가 절을 읽고 누른다(자동으로 열지 않는다).
+        if (!stopRef.current && cur >= steps.length) {
+          // 끝난 연계는 **비운다**(10-06 지적: "사용하고 나면 없어져야"). 단계별 모드로 중간에
+          // 멈춘 것·오류로 멈춘 것만 남는다(이어 돌려야 하므로).
           await persistComposition(null);
         }
       } finally {
@@ -805,7 +789,6 @@ function PageShellInner() {
               open: showRightPanel,
               onToggle: () => setRpOpen(!rpOpen),
             }}
-            forceProcess={composing}
             templates={showPro ? templates : undefined}
             presets={showPro ? PRESET_TASKS : undefined}
             onPickTemplate={(t) => void openComposer(t)}
@@ -960,8 +943,7 @@ function PageShellInner() {
                 open: showRightPanel,
                 onToggle: toggleRight,
               }}
-              forceProcess={composing}
-              templates={showPro ? templates : undefined}
+                templates={showPro ? templates : undefined}
               presets={showPro ? PRESET_TASKS : undefined}
               onPickTemplate={(t) => void openComposer(t)}
             />
@@ -1061,8 +1043,6 @@ type ChatColumnProps = {
   onOpenThreads: () => void;
   /** RightPanel 토글 가능 시 (mode 활성). null이면 토글 안 표시 */
   rightPanelToggle: { open: boolean; onToggle: () => void };
-  /** 연계가 도는 동안 숨은 단계 턴을 강제로 보인다(2026-10-05). */
-  forceProcess?: boolean;
   /** 조합 패널 열기(2026-10-02) — 전문가 모드에서만 전달된다. */
   onOpenComposer?: () => void;
   /** 첫 화면 "내 직무" 타일(2026-10-06) — 전문가 모드에서만 채워진다 */
@@ -1133,7 +1113,6 @@ function ChatColumn({
   onOpenThreads,
   rightPanelToggle,
   onOpenComposer,
-  forceProcess,
   templates,
   presets,
   onPickTemplate,
@@ -1157,10 +1136,8 @@ function ChatColumn({
     [chat.state.turns],
   );
   const visibleTurns = useMemo(
-    () => (showProcess || forceProcess
-      ? chat.state.turns
-      : chat.state.turns.filter((t) => !t.hidden)),
-    [chat.state.turns, showProcess, forceProcess],
+    () => (showProcess ? chat.state.turns : chat.state.turns.filter((t) => !t.hidden)),
+    [chat.state.turns, showProcess],
   );
 
   // 의견서 초안(2026-10-01) — 입력창 버튼이 이벤트를 쏘면 여기서 생성·오픈한다.
@@ -1605,10 +1582,41 @@ function ChatColumn({
                     : `과정 보기 · 조합 단계 ${hiddenTurnCount}건`}
                 </button>
               ) : null}
-              {visibleTurns.map((t, i) => {
-                // 재설계(2026-07-24): 보고서는 턴 타임라인에 없음 — 활성 판정은
-                // 채팅 스트림만. 보고서 진행은 입력창 위 노티스+우측 패널.
-                const isLast = i === visibleTurns.length - 1;
+              {groupRuns(visibleTurns).map((blk, bi, blocks) => {
+                // 연계 보고서 뷰(2026-10-06) — 같은 run 의 턴들을 한 편으로. 활성 턴은
+                // 전체 목록의 마지막 턴.
+                const lastTurn = visibleTurns.at(-1);
+                const activeId = chatActive && lastTurn ? lastTurn.id : null;
+                if (blk.kind === "run") {
+                  const lastF = blk.turns.at(-1)?.feature;
+                  const lastStep = lastF?.run && lastF.run.index === lastF.run.total - 1 ? lastF : null;
+                  const endAction =
+                    lastStep?.id === "brief"
+                      ? { label: `서면 초안 열기(${lastStep.values["서면 종류"] ?? "의견서"})`, icon: "draft",
+                          onClick: () => window.dispatchEvent(new CustomEvent(OPEN_BRIEF_EVENT, {
+                            detail: { kind: briefKindOf(lastStep.values["서면 종류"]) } })) }
+                      : lastStep?.id === "form_find"
+                        ? { label: "서식 목록 열기", icon: "description",
+                            onClick: () => window.dispatchEvent(new Event(OPEN_FORM_LIST_EVENT)) }
+                        : null;
+                  return (
+                    <RunReport
+                      key={`run-${blk.runId}-${bi}`}
+                      runId={blk.runId}
+                      name={blk.name}
+                      total={blk.total}
+                      turns={blk.turns}
+                      activeTurnId={activeId}
+                      liveProgress={state.live_progress ?? null}
+                      liveResults={state.live_results ?? null}
+                      onUseAsForm={onUseAsForm}
+                      onResume={(v) => void resume(v)}
+                      endAction={bi === blocks.length - 1 ? endAction : null}
+                    />
+                  );
+                }
+                const t = blk.turn;
+                const isLast = t.id === lastTurn?.id;
                 const turnActive = isLast && chatActive;
                 return (
                   <TurnView

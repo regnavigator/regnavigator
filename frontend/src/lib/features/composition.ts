@@ -5,12 +5,15 @@
  * 그대로 장기 목표인 **직무(task)** 의 저장 형태가 된다 — task 는 "이 객체에
  * 이름을 붙여 따로 저장하는 것"으로 끝나야 하므로 단계 하나가 자족적이다.
  *
- * 실행 모델: 각 단계는 **숨은 턴**으로 돌고, 마지막에 종합 1건만 보인다.
- * 단계마다 답을 쏟으면 읽을 수 없는 대화가 된다.
+ * 실행 모델(2026-10-06 개정): 각 단계는 **보이는 턴**으로 돌고, 같은 run 의 턴들은
+ * 프런트가 **보고서 한 편**(`RunReport`)으로 묶어 그린다 — 절마다 기능 제목이 중제목,
+ * 프롬프트는 접힘. 종합 턴은 없다(단계 답변 자체가 본문). 종전 "숨은 턴 + 종합"은
+ * 단계 답변이 전부 사라져 폐기.
  */
 
 import { apiFetch } from "@/lib/api/client";
 import { LEGACY_FN, type Feature } from "@/lib/features/catalog";
+import type { FeatureMeta } from "@/lib/store/types";
 
 export type CompositionFile = { id: string; name: string; chars: number };
 
@@ -30,6 +33,10 @@ export type Composition = {
   /** stepwise = 단계마다 멈춰 사람이 검토 · auto = 끝까지 자동 */
   mode: "stepwise" | "auto";
   status: "draft" | "running" | "done";
+  /** 실행 중인 연계의 run id(2026-10-06) — 단계별 모드로 이어 돌릴 때 같은 보고서에 붙인다 */
+  runId?: string;
+  /** 직무 이름 — 보고서 제목 */
+  name?: string;
 };
 
 export function emptyStep(f: Feature): CompositionStep {
@@ -138,6 +145,7 @@ export function toTemplateSteps(c: Composition): TemplateStep[] {
 export function fromTemplate(
   steps: TemplateStep[],
   byId: Map<string, Feature>,
+  name?: string,
 ): { composition: Composition | null; dropped: string[] } {
   const dropped: string[] = [];
   const out: CompositionStep[] = [];
@@ -150,7 +158,7 @@ export function fromTemplate(
   }
   if (!out.length) return { composition: null, dropped };
   return {
-    composition: { steps: out, cursor: 0, mode: "stepwise", status: "draft" },
+    composition: { steps: out, cursor: 0, mode: "stepwise", status: "draft", ...(name ? { name } : {}) },
     dropped,
   };
 }
@@ -195,19 +203,22 @@ export function stepMessage(
   return lead + f.title;
 }
 
+/* ─────────────────── 턴 렌더 메타 ─────────────────── */
+
 /**
- * 마지막 종합 — 이것만 화면에 보인다.
- *
- * 사용자 말풍선으로 남는 문장이라 읽을 수 있어야 한다. 긴 지시문을 그대로 두면
- * 대화가 지저분해지므로 단계 목록 + 짧은 요구로 쓴다.
+ * 기능 턴의 렌더 메타(2026-10-06). 프롬프트 전문 대신 "기능 제목 + 입력값"을 보이게 하고,
+ * `run` 이 있으면 같은 run 의 턴들이 보고서 뷰 한 편으로 묶인다. **모델 입력엔 들어가지
+ * 않는다**(백엔드가 `additional_kwargs` 에만 저장).
  */
-export function synthesisMessage(titles: string[]): string {
-  const list = titles.map((t, i) => `${i + 1}. ${t}`).join("\n");
-  return (
-    `다음 단계를 거쳤어.\n${list}\n\n` +
-    "각 단계에서 확인한 것을 하나로 종합해서 정리해줘. " +
-    "결론과 근거를 먼저 쓰고, 단계별로 무엇이 확인됐는지, " +
-    "그리고 아직 확인되지 않은 쟁점이 무엇인지 적어줘. " +
-    "앞 단계에서 확인되지 않은 것을 새로 지어내지 마."
-  );
+export function featureMeta(
+  f: Feature,
+  st: CompositionStep,
+  run?: { id: string; index: number; total: number; name?: string },
+): FeatureMeta {
+  const values: Record<string, string> = {};
+  for (const fd of f.form?.fields ?? []) {
+    const v = (st.values[fd.key] ?? "").trim();
+    if (v) values[fd.label.replace(/\s*\(선택\)\s*$/, "")] = v;
+  }
+  return { id: f.id, title: f.title, icon: f.icon, values, ...(run ? { run } : {}) };
 }

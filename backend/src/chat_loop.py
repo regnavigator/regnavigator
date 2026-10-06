@@ -1423,6 +1423,7 @@ async def run_chat_turn(
     hidden: bool = False,  # 조합 중간 단계 — 채팅에 렌더하지 않는다
     skill_hint: Optional[str] = None,  # "irb_drb" — 프런트 버튼 명시 진입
     doc_kinds: Optional[list[str]] = None,  # 턴 기본 검색 종별(기능 힌트)
+    feature: Optional[dict] = None,  # 기능 턴 렌더 메타(2026-10-06) — 모델 입력 아님
 ) -> AsyncIterator[dict]:
     """한 턴 실행 — 이벤트 dict 스트림.
 
@@ -1448,7 +1449,7 @@ async def run_chat_turn(
                     selected_law_keys=selected_law_keys,
                     model_name=model_name, models=models, emit=_emit,
                     style=style, confidential=confidential, hidden=hidden,
-                    skill_hint=skill_hint, doc_kinds=doc_kinds,
+                    skill_hint=skill_hint, doc_kinds=doc_kinds, feature=feature,
                 )
         except Exception as e:  # noqa: BLE001 — 스트림에 사용자향 에러 후 종료
             _log.exception("chat_loop turn failed: %s", e)
@@ -1507,6 +1508,7 @@ async def _run_turn(
     hidden: bool = False,  # 조합 중간 단계 — 채팅에 렌더하지 않는다
     skill_hint: Optional[str] = None,
     doc_kinds: Optional[list[str]] = None,
+    feature: Optional[dict] = None,
 ) -> None:
     # 동기 I/O(SQLite·PII NER HTTP)는 전부 to_thread — 이벤트 루프 점유 방지.
     # (20인 동시 부하 실측에서 /healthz 지연 ~7s 스파이크의 원인이었음.)
@@ -1563,14 +1565,18 @@ async def _run_turn(
         _log.info("chat_loop skills: 부착 (force=%s)", turn_skill_force)
 
     # at-rest PII 스크럽 후 저장 (PiiGate before_agent 대응)
-    human = HumanMessage(content=scrubbed, id=f"msg_{uuid4().hex[:12]}")
+    # 기능 턴 메타(2026-10-06)는 `additional_kwargs` 에만 — Anthropic 변환이 버리므로
+    # 모델 입력엔 섞이지 않고(실측), `message_to_dict` 가 직렬화해 스키마 변경 없이 저장된다.
+    human = HumanMessage(content=scrubbed, id=f"msg_{uuid4().hex[:12]}",
+                         additional_kwargs=({"feature": feature} if feature else {}))
     state.messages.append(human)
     await asyncio.to_thread(repo.append_messages, thread_id, [human],
                             sensitive=confidential, hidden=hidden)
     # `hidden` 은 스트리밍 중에도 필요하다 — 안 주면 조합 단계가 화면에 쏟아졌다가
-    # 새로고침 후에야 사라진다.
+    # 새로고침 후에야 사라진다. `feature` 도 같은 이유로 meta 에 실어 준다.
     emit({"type": "meta", "thread_id": thread_id, "human_message_id": human.id,
-          **({"hidden": True} if hidden else {})})
+          **({"hidden": True} if hidden else {}),
+          **({"feature": feature} if feature else {})})
 
     # 입력이 PII 필터링된 경우 프론트에 알림(배지/토스트). 카테고리는 중복 제거.
     # 프론트: 이 메시지에 "개인정보(이름·주소 등)가 자동 제거되었습니다" 가벼운 표시.

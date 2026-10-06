@@ -46,6 +46,7 @@ import {
 import { toast } from "sonner";
 import type {
   ChatState,
+  FeatureMeta,
   FileEntry,
   Message,
   Report,
@@ -98,6 +99,8 @@ async function fetchThreadValues(
     // 조합 중간 단계(2026-10-02) — 빠뜨리면 새로고침 후 숨김이 풀려
     // 단계 답변이 전부 쏟아진다(실측).
     ...(m.hidden ? { hidden: true } : {}),
+    // 기능 턴 메타(2026-10-06) — 새로고침 후에도 카드/보고서 절로.
+    ...(m.feature ? { feature: m.feature } : {}),
   }));
   return {
     messages, files: {}, steps: res.steps ?? [],
@@ -166,6 +169,8 @@ export function useChatState(
       /** 조합 첨부 — 서버가 본문을 꺼내 합친다(텍스트를 다시 올리지 않는다) */
       workflowFileIds?: string[];
       docKinds?: string[];
+      /** 기능 턴 렌더 메타(2026-10-06) — 말풍선 대신 기능 카드/보고서 절 */
+      feature?: FeatureMeta;
     },
   ) => Promise<void>;
   /** 보고서 트리거(next_steps `kind:"report"` 클릭) — `POST /reports` + 폴링. */
@@ -226,6 +231,7 @@ export function useChatState(
         confidential?: boolean;
         workflowFileIds?: string[];
         docKinds?: string[];
+        feature?: FeatureMeta;
       }
     | { kind: "report"; prompt: string; idempotencyKey: string }
     | null
@@ -342,10 +348,10 @@ export function useChatState(
       onError: (data: unknown) => {
         setState((prev) => applyError(prev, data));
       },
-      onMeta: (humanMessageId: string, hidden?: boolean) => {
+      onMeta: (humanMessageId: string, hidden?: boolean, feature?: FeatureMeta) => {
         const localId = pendingLocalIdRef.current;
         if (!localId) return;
-        setState((prev) => applyMeta(prev, humanMessageId, localId, !!hidden));
+        setState((prev) => applyMeta(prev, humanMessageId, localId, !!hidden, feature));
       },
       onToolProgress: (event: ToolProgressEvent) => {
         setState((prev) => applyToolProgress(prev, event));
@@ -370,6 +376,8 @@ export function useChatState(
         confidential?: boolean;
         workflowFileIds?: string[];
         docKinds?: string[];
+        /** 기능 턴 렌더 메타(2026-10-06) — 말풍선 대신 기능 카드/보고서 절 */
+        feature?: FeatureMeta;
       },
     ) => {
       if (!threadId) return;
@@ -385,6 +393,7 @@ export function useChatState(
         confidential: opts?.confidential,
         workflowFileIds: opts?.workflowFileIds,
         docKinds: opts?.docKinds,
+        feature: opts?.feature,
       };
       pendingLocalIdRef.current = localId;
       const isFirstForTitle =
@@ -394,7 +403,8 @@ export function useChatState(
       const displayContent = composeWithAttachments(text, opts?.attachments);
       setState((prev) => ({
         ...applyValues(prev, {
-          messages: [{ id: localId, type: "human", content: displayContent, ts }],
+          messages: [{ id: localId, type: "human", content: displayContent, ts,
+                       ...(opts?.feature ? { feature: opts.feature } : {}) }],
         }),
         live_progress: null,
         live_results: null,
@@ -428,6 +438,7 @@ export function useChatState(
         confidential: opts?.confidential,
         workflowFileIds: opts?.workflowFileIds,
         docKinds: opts?.docKinds,
+        feature: opts?.feature,
           },
           handlers,
         );

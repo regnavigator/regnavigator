@@ -9,7 +9,7 @@
 import { getAuthToken } from "@/lib/client/authToken";
 import { getEffectiveSettings } from "@/lib/store/settings";
 import type { ApiError } from "@/lib/api/client";
-import type { Step } from "@/lib/store/types";
+import type { FeatureMeta, Step } from "@/lib/store/types";
 
 /* ─────────────────── 이벤트 타입 (frontend_chat_v2 §2) ─────────────────── */
 
@@ -20,6 +20,8 @@ export type ChatSseEvent =
       human_message_id: string;
       /** 조합 중간 단계(2026-10-02) — 이 턴은 렌더하지 않는다 */
       hidden?: boolean;
+      /** 기능 턴 메타(2026-10-06) — 스트리밍 중에도 카드로 보이게 */
+      feature?: FeatureMeta;
     }
   | {
       // 입력이 PII 필터링됨 — 프론트 배지/토스트로 "개인정보 자동 제거" 고지.
@@ -125,6 +127,8 @@ export async function streamChatEvents(
     workflow_file_ids?: string[] | null;
     /** 턴 기본 검색 종별 — 기능 힌트(2026-10-03) */
     doc_kinds?: string[] | null;
+    /** 기능 턴 렌더 메타(2026-10-06) */
+    feature?: FeatureMeta | null;
   },
   opts: { signal?: AbortSignal },
   onEvent: (ev: ChatSseEvent) => void,
@@ -200,6 +204,8 @@ export type ChatStateResponse = {
     report_id?: string;
     /** 조합 중간 단계(2026-10-02) — 기본 렌더에서 제외("과정 보기"로만) */
     hidden?: boolean;
+    /** 기능 턴 메타(2026-10-06) */
+    feature?: FeatureMeta;
   }>;
   steps: Step[];
   selected_law_keys: string[];

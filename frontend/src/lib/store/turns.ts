@@ -104,16 +104,7 @@ import {
   mergeSteps,
   toArtifact,
 } from "@/lib/parse/derive";
-import type {
-  Artifact,
-  ChatState,
-  FileEntry,
-  InterruptValue,
-  Message,
-  Step,
-  ToolProgressEvent,
-  Turn,
-} from "@/lib/store/types";
+import type { Artifact, ChatState, FeatureMeta, FileEntry, InterruptValue, Message, Step, ToolProgressEvent, Turn } from "@/lib/store/types";
 
 /* ─────────────────── ChatState helpers ─────────────────── */
 
@@ -423,35 +414,29 @@ export function applyMeta(
   serverHumanId: string,
   localId: string,
   hidden = false,
+  feature?: FeatureMeta,
 ): ChatState {
+  const extra = {
+    ...(hidden ? { hidden: true } : {}),
+    ...(feature ? { feature } : {}),
+  };
   if (!serverHumanId || serverHumanId === localId) {
-    // id 는 그대로여도 hidden 은 반영해야 한다 — 안 하면 조합 단계가 화면에
-    // 쏟아졌다가 새로고침 후에야 사라진다.
-    if (!hidden) return prev;
+    // id 는 그대로여도 hidden·feature 는 반영해야 한다 — 안 하면 조합 단계가 화면에
+    // 쏟아졌다가 새로고침 후에야 사라지고, 기능 카드가 프롬프트 말풍선으로 보인다.
+    if (!hidden && !feature) return prev;
     return {
       ...prev,
-      messages: prev.messages.map((m) =>
-        m.id === localId ? { ...m, hidden: true } : m,
-      ),
-      turns: prev.turns.map((t) => (t.id === localId ? { ...t, hidden: true } : t)),
+      messages: prev.messages.map((m) => (m.id === localId ? { ...m, ...extra } : m)),
+      turns: prev.turns.map((t) => (t.id === localId ? { ...t, ...extra } : t)),
     };
   }
   const idx = prev.messages.findIndex((m) => m.id === localId);
   if (idx < 0) return prev;
   const messages = prev.messages.slice();
-  messages[idx] = {
-    ...messages[idx]!,
-    id: serverHumanId,
-    ...(hidden ? { hidden: true } : {}),
-  };
+  messages[idx] = { ...messages[idx]!, id: serverHumanId, ...extra };
   const turns = prev.turns.map((t) =>
     t.id === localId
-      ? {
-          ...t,
-          id: serverHumanId,
-          user_message: { ...t.user_message, id: serverHumanId },
-          ...(hidden ? { hidden: true } : {}),
-        }
+      ? { ...t, id: serverHumanId, user_message: { ...t.user_message, id: serverHumanId }, ...extra }
       : t,
   );
   return { ...prev, messages, turns };
@@ -639,7 +624,7 @@ export type StreamHandlers = {
   onInterrupt: (value: InterruptValue) => void;
   onError: (data: unknown) => void;
   /** 자체 SSE `meta` — 서버 발급 human message id (localId 치환용) */
-  onMeta?: (humanMessageId: string, hidden?: boolean) => void;
+  onMeta?: (humanMessageId: string, hidden?: boolean, feature?: FeatureMeta) => void;
   /** custom 채널의 tool_progress 이벤트 — running step에 라이브 메시지 갱신 (back v4) */
   onToolProgress?: (event: ToolProgressEvent) => void;
   /** `done` 이벤트 수신 — 텍스트 확정. 이후 grounding(trailing steps)이 와도 턴은
@@ -785,6 +770,8 @@ export async function runStream(
     workflowFileIds?: string[];
     /** 턴 기본 검색 종별(기능 힌트) */
     docKinds?: string[];
+    /** 기능 턴 렌더 메타(2026-10-06) */
+    feature?: FeatureMeta;
     inactivityTimeoutMs?: number;
   },
   handlers: StreamHandlers,
@@ -815,7 +802,7 @@ export async function runStream(
     }
     switch (ev.type) {
       case "meta":
-        handlers.onMeta?.(ev.human_message_id, ev.hidden);
+        handlers.onMeta?.(ev.human_message_id, ev.hidden, ev.feature);
         break;
       case "pii_notice": {
         // 입력에서 개인정보 자동 제거됨 — 토스트 고지 + 오탐 신고(2026-08-13).
@@ -971,6 +958,7 @@ export async function runStream(
           hidden: options.hidden ?? false,
           workflow_file_ids: options.workflowFileIds ?? null,
           doc_kinds: options.docKinds ?? null,
+      feature: options.feature ?? null,
         },
         { signal: innerAc.signal },
         onEvent,

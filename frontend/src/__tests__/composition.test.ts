@@ -68,6 +68,11 @@ describe("직무 템플릿 ↔ 조합", () => {
     expect(r.composition?.steps.every((s) => Object.keys(s.values).length === 0 && s.files.length === 0)).toBe(true);
   });
 
+  it("fromTemplate 는 직무 이름을 조합에 심는다 (보고서 제목)", () => {
+    const r = fromTemplate([{ fn: "prec_issues", confidential: false }], byId, "사건 초기 검토");
+    expect(r.composition?.name).toBe("사건 초기 검토");
+  });
+
   it("전부 없는 id 면 조합 없음", () => {
     expect(fromTemplate([{ fn: "x", confidential: false }], byId).composition).toBeNull();
   });

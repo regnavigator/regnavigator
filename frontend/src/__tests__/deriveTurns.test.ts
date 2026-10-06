@@ -48,3 +48,14 @@ describe("deriveTurns", () => {
     expect(turns[1]!.steps).toHaveLength(1);
   });
 });
+
+describe("deriveTurns — feature 메타(2026-10-06)", () => {
+  it("human 메시지의 feature 가 턴에 그대로 실린다", () => {
+    const feature = { id: "prec_issues", title: "판례", values: { 쟁점: "x" },
+                      run: { id: "run_1", index: 0, total: 2 } };
+    const h = { id: "h1", type: "human", content: "프롬프트", feature } as unknown as Message;
+    const turns = deriveTurns([h, ai("a1", "답")], {}, []);
+    expect(turns[0]!.feature).toEqual(feature);
+    expect(turns[0]!.user_message.content).toBe("프롬프트");
+  });
+});

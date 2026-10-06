@@ -20,6 +20,7 @@ export type {
   Artifact,
   InterruptValue,
   Turn,
+  FeatureMeta,
 } from "./types/chat";
 export type { ToolProgressEvent } from "./types/deep";
 export type { Report } from "./types/report";

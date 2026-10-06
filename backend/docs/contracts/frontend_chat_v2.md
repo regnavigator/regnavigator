@@ -115,6 +115,12 @@ type ExtractResp = {
 {"type": "meta", "thread_id": "t_8a05...", "human_message_id": "msg_330d...", "hidden": true}
 ```
 
+**`feature` (2026-10-06, 요청 선택 필드 · `meta` 이벤트 · `GET /chat/{tid}/state` 메시지)** — 기능 카드로 보낸
+턴의 렌더 메타. `{id, title, icon?, values: {라벨: 값}, run?: {id, index, total, name?}}`. 백엔드는 모델 입력에
+넣지 않고 human 메시지의 `additional_kwargs.feature` 에만 저장한다(상한: 값 20개·4000자). 프런트는 이걸로
+사용자 말풍선 대신 기능 카드를 그리고, `run.id` 가 같은 연속 턴을 **보고서 뷰 1편**으로 묶는다. `hidden` 은
+새 연계에서 더 이상 보내지 않는다(옛 스레드 호환만).
+
 ### 2-1b. `pii_notice` — 입력 개인정보 자동 제거 고지 (선택 발생)
 
 입력에 개인정보(이름·주소·전화·주민번호 등)가 있어 `[이름]`/`[주소]` 등으로
