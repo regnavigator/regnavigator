@@ -488,6 +488,32 @@ async def suggest_workflow_values(thread_id: str, request: Request):
     context = "\n\n---\n\n".join(parts[-3:])[-SUGGEST_CONTEXT_CHARS:]
     values = await suggest_values(
         title=str(body.get("title") or ""), fields=fields, context=context)
+
+    # 판단 모델 적재(2026-10-06, `src/judgment.py`) — "앞 내용에 채울 정보가 있나" 를 함께
+    # 묻고 events 에만 쌓는다. **동작은 바꾸지 않는다**: 임계값을 정하려면 이 적재와
+    # 실제 채움 결과(values 비었나)를 대조한 오탐률이 먼저다(감사 M3).
+    try:
+        from src.judgment import Question, judge
+
+        # LLM 폴백이 있어 항상 시도한다 — 기밀 산출은 위에서 이미 뺐다.
+        keys = ", ".join(str(f.get("label") or f.get("key")) for f in fields if f.get("key"))
+        j = await judge(context, {
+            "fillable": Question(f"앞 내용에 다음 항목을 채울 정보가 실제로 있는가: {keys}"),
+        })
+        if j.answers:
+            from src.persistence import Event, get_events_repo
+
+            await asyncio.to_thread(get_events_repo().emit, Event(
+                id="", ts="", event_type="judgment",
+                user_id=getattr(request.state, "user_id", None), thread_id=thread_id,
+                payload_json=json.dumps({
+                    "site": "workflow_suggest", "backend": j.backend,
+                    "fillable": j.answers.get("fillable"),
+                    "filled": bool(values), "n_fields": len(fields),
+                }, ensure_ascii=False),
+            ))
+    except Exception as e:  # noqa: BLE001 — 적재 실패가 제안을 막으면 안 된다
+        _log.info("판단 적재 실패(무시): %s", e)
     return {"values": values}
 
 

@@ -78,6 +78,30 @@ export type Feature = {
   expects: string[];
   /** 지금 이 상황에서 쓸 수 있는가. 없으면 항상 노출. */
   availableWhen?: (ctx: FeatureContext) => boolean;
+  /**
+   * 연계에서 **무엇을 받고 무엇을 내는가**(2026-10-06, 공백 채움용). 소수의 명사 어휘
+   * (`Slot`)로 고정 — `fn` 처럼 저장·비교에 쓰이므로 한 번 정하면 바꾸지 않는다.
+   * `needs` 의 한 원소가 배열이면 **그중 하나**면 된다(facts 또는 doc). 없으면 연계
+   * 공백 판정 대상이 아니다(`life_*`·`mon_*`).
+   */
+  io?: { needs: (Slot | Slot[])[]; yields: Slot[] };
+};
+
+/** 연계 슬롯 어휘 — 기능 사이를 오가는 산출의 종류. 저장 어휘라 추가만 하고 바꾸지 않는다. */
+export type Slot =
+  | "facts"      // 사실관계
+  | "issue"      // 쟁점
+  | "subject"    // 규제 대상(사업·제품·행위)
+  | "article"    // 조문
+  | "precedent"  // 판례
+  | "duty"       // 의무 목록
+  | "form"       // 서식
+  | "sanction"   // 제재
+  | "doc";       // 첨부 문서
+
+export const SLOT_LABEL: Record<Slot, string> = {
+  facts: "사실관계", issue: "쟁점", subject: "규제 대상", article: "조문", precedent: "판례",
+  duty: "의무 목록", form: "서식", sanction: "제재", doc: "첨부 문서",
 };
 
 /** 빈 칸은 `___` 로 남긴다 — 프리필은 자동 전송되지 않으므로 그대로 템플릿이 된다. */
@@ -89,6 +113,7 @@ function slot(v: string | undefined, hint: string): string {
 const EXPERT: Feature[] = [
   {
     id: "pathway",
+    io: { needs: ["subject"], yields: ["duty", "article", "form"] },
     category: "규제 경로 분해",
     title: "인허가·신고 의무를 단계로 분해",
     subtitle: "무엇을 → 어디에 → 어떤 서식으로 → 언제까지",
@@ -111,6 +136,7 @@ const EXPERT: Feature[] = [
   },
   {
     id: "form_find",
+    io: { needs: ["subject"], yields: ["form", "article"] },
     category: "서식 작성",
     title: "제출 서식·별표를 찾아 바로 작성",
     subtitle: "서식 번호 · 근거 조문 · 첨부 서류",
@@ -132,6 +158,7 @@ const EXPERT: Feature[] = [
   },
   {
     id: "case_issues",
+    io: { needs: [["facts", "doc"]], yields: ["issue", "article"] },
     category: "기밀 검토",
     stickiness: "thread",   // 한 번 켜지면 스레드 내내 유지된다
     title: "사건 파일로 적용 법령·쟁점 검토",
@@ -156,6 +183,7 @@ const EXPERT: Feature[] = [
   },
   {
     id: "doc_review",
+    io: { needs: ["doc"], yields: ["issue", "article"] },
     category: "문서 검토",
     stickiness: "thread",   // 첨부가 기밀을 켠다 — 역시 스레드 단위
     title: "계약서·내부 규정을 첨부해 검토",
@@ -178,6 +206,7 @@ const EXPERT: Feature[] = [
   },
   {
     id: "prec_issues",
+    io: { needs: ["issue"], yields: ["precedent"] },
     docKinds: ["prec"],
     category: "판례 검토",
     title: "판례 검색 · 핵심 이슈 정리",
@@ -204,6 +233,7 @@ const EXPERT: Feature[] = [
   },
   {
     id: "article_diff",
+    io: { needs: ["article"], yields: ["article"] },
     category: "조문 변동",
     title: "조문 변동 대조",
     subtitle: "현행 ↔ 개정예정 · 기준 시점 이후 개정 여부",
@@ -235,6 +265,7 @@ const EXPERT: Feature[] = [
   },
   {
     id: "rule_gap",
+    io: { needs: ["doc"], yields: ["duty", "article"] },
     category: "규정 점검",
     title: "사내 규정 ↔ 법령 갭 점검",
     subtitle: "첨부한 내규가 현행 법령을 반영했는지",
@@ -261,6 +292,7 @@ const EXPERT: Feature[] = [
   },
   {
     id: "duty_matrix",
+    io: { needs: ["subject"], yields: ["duty", "article", "sanction"] },
     category: "의무 정리",
     title: "의무 주체 · 기한 · 제재 추출",
     subtitle: "누가 · 언제까지 · 안 하면 얼마",
@@ -289,6 +321,7 @@ const EXPERT: Feature[] = [
   },
   {
     id: "ordinance_compare",
+    io: { needs: ["subject"], yields: ["article"] },
     docKinds: ["ordin"],
     category: "지역 비교",
     title: "지자체별 조례 요건 비교",
@@ -313,6 +346,7 @@ const EXPERT: Feature[] = [
   },
   {
     id: "interpretation",
+    io: { needs: [["issue", "article"]], yields: ["article"] },
     docKinds: ["expc"],
     category: "유권해석",
     title: "유권해석 · 행정해석 확인",
@@ -336,6 +370,7 @@ const EXPERT: Feature[] = [
   },
   {
     id: "cite_verify",
+    io: { needs: [["article", "precedent"]], yields: ["article", "precedent"] },
     category: "인용 검증",
     title: "인용된 조문 · 판례 검증",
     subtitle: "상대방 서면 · AI 산출물의 날조 판별",
@@ -363,6 +398,7 @@ const EXPERT: Feature[] = [
   },
   {
     id: "sanction_level",
+    io: { needs: [["duty", "article"]], yields: ["sanction"] },
     docKinds: ["admrul_attach", "prec"],
     category: "제재 가늠",
     title: "제재 수위 가늠",
@@ -387,6 +423,7 @@ const EXPERT: Feature[] = [
   },
   {
     id: "pending_watch",
+    io: { needs: ["subject"], yields: ["article"] },
     category: "개정 추적",
     title: "개정 예정 · 시행 대기 확인",
     subtitle: "공포됐지만 아직 시행 전인 것",
@@ -414,6 +451,7 @@ const EXPERT: Feature[] = [
   },
   {
     id: "impact_graph",
+    io: { needs: ["article"], yields: ["article"] },
     docKinds: ["impact"],
     category: "영향 분석",
     title: "조문 개정 영향 범위",
@@ -622,6 +660,7 @@ const MONITOR: Feature[] = [
  */
 const BRIEF: Feature = {
   id: "brief",
+  io: { needs: ["issue", "article", "precedent"], yields: [] },
   category: "서면 작성",
   title: "의견서 초안 만들기",
   subtitle: "사실관계 · 쟁점 · 검토 · 결론 골격 + 근거 목록",

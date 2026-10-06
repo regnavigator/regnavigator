@@ -181,6 +181,12 @@ ENV_REGISTRY: tuple[Setting, ...] = (
     Setting("INTENT_API_URL", None, "guardrail", "의도 분류 서비스 URL(미설정=휴리스틱)"),
     Setting("INTENT_API_KEY", None, "guardrail", "의도 분류 X-API-Key", secret=True),
     Setting("INTENT_TIMEOUT_S", "1", "guardrail", "의도 분류 타임아웃(입구 저지연)"),
+    # 판단 모델(2026-10-06, `src/judgment.py`) — state+타입 질문 → 확률. 측정 전엔 events 적재만.
+    Setting("JUDGE_LOCAL_BASE_URL", None, "guardrail",
+            "원내 판단 모델(Ollama ≥0.35 /v1/systemone, Kev-4B 등). 기밀 턴은 이것만 쓴다"),
+    Setting("JUDGE_API_URL", None, "guardrail", "상용 판단 모델(TypeSafe Jev) base URL"),
+    Setting("JUDGE_API_KEY", None, "guardrail", "상용 판단 모델 Bearer 키", secret=True),
+    Setting("JUDGE_TIMEOUT_S", "2", "guardrail", "판단 모델 타임아웃"),
     # postgres / neo4j / mongo
     Setting("PG_HOST", None, "datastore", "openlaw PG 호스트(없으면 PG 비활성)"),
     Setting("PG_PORT", "5432", "datastore", "PG 포트"),

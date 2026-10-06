@@ -326,9 +326,27 @@ step3 → 숨은 턴 ┘
 - 상한 사용자당 50개 · 이름 80자 · 8단계. 코드: `lib/client/taskTemplates.ts`, `composition.ts`
   의 `toTemplateSteps/fromTemplate`, 백엔드 `persistence/task_templates_repo.py` · `routes/task_templates.py`.
 
-출처: `docs/Vibe_Coding_Agent_Master_Prompt.docx` 의 "템플릿 자산화"를 선별 적용(대조표는
-`/Users/…/plans` 가 아니라 `docs/CHANGELOG.md` 2026-10 항목 참조). 같은 문서의 분기 DAG·실패 시
-자동 우회·사전 시뮬레이션·Redis 는 채택하지 않았다.
+### 연계 공백 채움 — 구현 (2026-10-06)
+
+같은 문서의 "자가치유 라우팅"을 사용자 정정대로 읽은 것: **짠 연계에 빠진 단계가 있으면 채워
+제안**. 기능마다 `io: { needs, yields }`(`catalog.ts`, 슬롯 어휘 `Slot` 9개 — facts·issue·subject·
+article·precedent·duty·form·sanction·doc)를 두고, `lib/features/gaps.ts` 의 `findGaps` 가
+**결정적으로** 판정한다(LLM·판단 모델 없음). 단계 i 의 `needs` 가 앞 단계 `yields` ∪ 대화(있으면
+facts·issue·subject) ∪ 서식 인용(form) ∪ 첨부(doc) 에 없으면 그 단계 앞에 "빠진 단계 — ○○: △△
+넣기" 행이 선다. **제안일 뿐 자동 삽입하지 않는다**(실행 전 사용자 승인). 그 슬롯을 내는 기능이
+없는 공백(subject·doc 은 사용자 입력)은 제안하지 않는다 — 그건 폼 빈 칸이다. `brief`(의견서)는
+`io.needs` 가 있지만 패널에서 턴으로 보낼 수 없어(모달) 연계 단계가 되지 않는다.
+
+### 판단 모델 계층 — 적재만 (2026-10-06)
+
+`backend/src/judgment.py`: `judge(state, {key: Question}) -> {key: 확률}`. 백엔드 ① 원내
+`JUDGE_LOCAL_BASE_URL`(Ollama ≥0.35 `/v1/systemone`, Kev-4B) → ② 상용 `JUDGE_API_URL`(TypeSafe
+Jev) → ③ `aux_model()` LLM 폴백. 기밀 턴은 ①만. 지금은 `/workflow/suggest` 가 "앞 내용에 채울
+정보가 있나"를 함께 묻고 **events(`judgment`)에 적재만** 한다 — 임계값은 이 적재와 실제 채움
+결과를 대조한 오탐률이 나온 뒤에 켠다(감사 M3). dev 실측: 백엔드 `llm`, `fillable` 0.95/0.15.
+
+출처: `docs/Vibe_Coding_Agent_Master_Prompt.docx` 선별 적용(대조표 `docs/CHANGELOG.md` 2026-10).
+채택하지 않은 것: 분기 DAG · 실패 시 자동 우회 실행 · 비용·실패확률 사전 시뮬레이션 · Redis.
 
 ## 12. 알려진 한계 / TODO
 

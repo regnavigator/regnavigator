@@ -4,6 +4,7 @@ import { featuresFor } from "@/lib/features/catalog";
 import {
   emptyStep, fromTemplate, stepBlanks, stepMessage, toTemplateSteps, type Composition,
 } from "@/lib/features/composition";
+import { findGaps } from "@/lib/features/gaps";
 
 const pathway = featuresFor({ mode: "expert", hasTurns: true }).find((f) => f.id === "pathway")!;
 
@@ -68,5 +69,40 @@ describe("직무 템플릿 ↔ 조합", () => {
 
   it("전부 없는 id 면 조합 없음", () => {
     expect(fromTemplate([{ fn: "x", confidential: false }], byId).composition).toBeNull();
+  });
+});
+
+describe("연계 공백 판정 findGaps", () => {
+  const all = featuresFor({ mode: "expert", hasTurns: true });
+  const byId = new Map(all.map((f) => [f.id, f]));
+  const steps = (...ids: string[]) => ids.map((id) => emptyStep(byId.get(id)!));
+  const none = { hasTurns: false, hasFormCitations: false, hasAttachments: false };
+
+  it("사건 검토 → 의견서: 판례가 빠졌다", () => {
+    const gaps = findGaps(steps("case_issues", "brief"), byId, none, all);
+    expect(gaps.map((g) => [g.at, g.slot])).toEqual([[1, "precedent"]]);
+    expect(gaps[0]!.candidates.map((c) => c.id)).toContain("prec_issues");
+  });
+  it("사건 검토 → 판례 → 의견서: 공백 없음", () => {
+    expect(findGaps(steps("case_issues", "prec_issues", "brief"), byId, none, all)).toEqual([]);
+  });
+  it("채울 기능이 없는 슬롯(subject 는 사용자 입력)은 제안하지 않는다", () => {
+    // form_find 는 subject 가 필요하지만 subject 를 '내는' 기능은 없다 — 끼울 단계가
+    // 없는 공백은 제안이 아니라 폼 빈 칸이다. 대화가 있어도 결과는 같다.
+    const s = steps("prec_issues", "form_find");
+    expect(findGaps(s, byId, none, all)).toEqual([]);
+    expect(findGaps(s, byId, { ...none, hasTurns: true }, all)).toEqual([]);
+  });
+  it("첨부가 있으면 doc 공백이 아니다", () => {
+    const s = steps("prec_issues", "rule_gap");
+    expect(findGaps(s, byId, none, all).map((g) => g.slot)).toEqual([]); // doc 을 내는 기능도 없다
+    expect(findGaps(s, byId, { ...none, hasAttachments: true }, all)).toEqual([]);
+  });
+  it("첫 단계의 빈 입력은 공백으로 보지 않는다 (폼에 직접 적는다)", () => {
+    expect(findGaps(steps("prec_issues", "sanction_level"), byId, none, all)
+      .map((g) => [g.at, g.slot])).toEqual([[1, "duty"]]);
+  });
+  it("단계 1개는 공백 없음", () => {
+    expect(findGaps(steps("brief"), byId, none, all)).toEqual([]);
   });
 });

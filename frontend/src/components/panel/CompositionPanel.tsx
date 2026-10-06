@@ -32,6 +32,7 @@ import {
   type CompositionStep,
 } from "@/lib/features/composition";
 import type { TaskTemplate } from "@/lib/client/taskTemplates";
+import { findGaps } from "@/lib/features/gaps";
 import type { AppMode } from "@/lib/store/mode";
 
 /** 대화에 나온 서식 인용 — form_find 가 목록으로 보여 준다. */
@@ -139,6 +140,22 @@ export function CompositionPanel({
   );
   const byId = useMemo(() => new Map(all.map((f) => [f.id, f])), [all]);
   const shown = useMemo(() => filterFeatures(all, q), [all, q]);
+  // 연계 공백(2026-10-06) — 결정적. 제안일 뿐 자동 삽입하지 않는다.
+  const gaps = useMemo(
+    () => findGaps(c.steps, byId, {
+      hasTurns,
+      hasFormCitations: formCitations.length > 0,
+      hasAttachments: c.steps.some((st) => st.files.length > 0),
+    }, all),
+    [c.steps, byId, hasTurns, formCitations.length, all],
+  );
+  const insertStep = (at: number, f: Feature) => {
+    if (c.steps.length >= 8) { toast.error("연계는 8단계까지입니다."); return; }
+    const steps = c.steps.slice();
+    steps.splice(at, 0, emptyStep(f));
+    patch({ steps, cursor: c.status === "done" ? 0 : c.cursor,
+            status: c.status === "done" ? "draft" : c.status });
+  };
 
   const patch = useCallback(
     (next: Partial<Composition>) => onChange({ ...c, ...next }),
@@ -597,6 +614,28 @@ export function CompositionPanel({
                     <button type="button" title="빼기" data-remove-step={i} onClick={() => removeStep(i)} className="text-[11px] text-md-on-surface-variant hover:text-md-error">✕</button>
                   </li>
                 );
+              }).flatMap((li, i) => {
+                // 공백 제안 — 그 단계 **앞에** 끼운다. 후보 첫 2개만 버튼으로.
+                const gapsHere = i < c.cursor ? [] : gaps.filter((g) => g.at === i);
+                if (!gapsHere.length) return [li];
+                return [
+                  <li key={`gap-${i}`} data-gap={i} className="mb-1 rounded-[8px] border border-dashed border-md-primary/50 bg-md-primary-container/20 px-2 py-1.5">
+                    {gapsHere.map((g) => (
+                      <div key={g.slot} className="flex flex-wrap items-center gap-1 text-[11px]">
+                        <span className="material-symbols-outlined text-[13px] text-md-primary" aria-hidden>add_circle</span>
+                        <span className="text-md-on-surface-variant">빠진 단계 — {g.label}:</span>
+                        {g.candidates.slice(0, 2).map((cand) => (
+                          <button key={cand.id} type="button" data-gap-insert={cand.id}
+                                  onClick={() => insertStep(i, cand)}
+                                  className="rounded-pill border border-md-primary px-2 py-0.5 text-[10.5px] font-medium text-md-primary hover:bg-md-primary hover:text-md-on-primary">
+                            {cand.title} 넣기
+                          </button>
+                        ))}
+                      </div>
+                    ))}
+                  </li>,
+                  li,
+                ];
               })}
             </ol>
             <div className="px-2.5 pb-2">
