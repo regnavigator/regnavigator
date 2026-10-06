@@ -11,8 +11,7 @@
  * 레이아웃만 다르고 **정의와 실행은 공유**한다(`catalog` / `useRunFeature`).
  */
 
-import { useMemo, useRef, useState } from "react";
-
+import { TilePager } from "@/components/ui/TilePager";
 import type { Feature } from "@/lib/features/catalog";
 
 
@@ -117,151 +116,33 @@ export function FeatureCards({
   );
 }
 
-/* ─────────────────── tiles — 3×3 페이지 ─────────────────── */
+/* ─────────────────── tiles — 3×3 페이지 (TilePager 공용) ─────────────────── */
 
-const TILES_PER_PAGE = 9;
-
-function chunk<T>(xs: T[], n: number): T[][] {
-  const out: T[][] = [];
-  for (let i = 0; i < xs.length; i += n) out.push(xs.slice(i, i + n));
-  return out;
-}
-
-/**
- * 스냅 스크롤 페이지 — 터치는 옆으로 밀고, 마우스는 화살표·점으로 넘긴다.
- * 페이지 폭은 컨테이너 폭이라 `scrollLeft / clientWidth` 가 곧 페이지 번호다.
- * 좁은 화면(<640px)은 2열로 떨어뜨린다 — 3열이면 타일이 100px 아래로 깨진다.
- */
-function FeatureTiles({
-  features,
-  onPick,
-}: {
-  features: Feature[];
-  onPick: (f: Feature) => void;
-}) {
-  const pages = useMemo(() => chunk(features, TILES_PER_PAGE), [features]);
-  const ref = useRef<HTMLDivElement>(null);
-  const [page, setPage] = useState(0);
-  const total = pages.length;
-
-  const go = (i: number) => {
-    const el = ref.current;
-    if (!el) return;
-    const n = Math.max(0, Math.min(i, total - 1));
-    el.scrollTo({ left: n * el.clientWidth, behavior: "smooth" });
-    setPage(n);
-  };
-  const onScroll = () => {
-    const el = ref.current;
-    if (!el || !el.clientWidth) return;
-    setPage(Math.round(el.scrollLeft / el.clientWidth));
-  };
-
-  const arrow =
-    "absolute top-1/2 hidden h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full border border-md-outline-variant bg-md-surface-container-lowest text-md-on-surface-variant shadow-sm transition-colors hover:border-md-primary hover:text-md-primary disabled:cursor-default disabled:opacity-25 disabled:hover:border-md-outline-variant disabled:hover:text-md-on-surface-variant sm:inline-flex";
-
+function FeatureTiles({ features, onPick }: { features: Feature[]; onPick: (f: Feature) => void }) {
   return (
-    <div className="w-full max-w-[720px]" data-testid="feature-tiles">
-      <div className="relative">
-        <div
-          ref={ref}
-          onScroll={onScroll}
-          role="region"
-          aria-roledescription="carousel"
-          aria-label="기능 목록"
-          className="flex snap-x snap-mandatory overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+    <TilePager
+      items={features}
+      keyOf={(f) => f.id}
+      ariaLabel="기능 목록"
+      testId="feature-tiles"
+      render={(f, { active }) => (
+        <button
+          type="button"
+          data-feature={f.title}
+          tabIndex={active ? 0 : -1}
+          onClick={() => onPick(f)}
+          title={f.expects.join("\n")}
+          className="flex h-full min-h-[104px] w-full flex-col gap-1 rounded-[10px] border border-md-outline-variant bg-md-surface-container-lowest p-3 text-left transition-colors hover:border-md-primary hover:bg-md-surface-container-low"
         >
-          {pages.map((pg, i) => (
-            <ul
-              key={i}
-              aria-label={`${i + 1} / ${total} 페이지`}
-              aria-hidden={i !== page}
-              className="grid w-full shrink-0 snap-start grid-cols-2 gap-2 px-0.5 sm:grid-cols-3"
-            >
-              {pg.map((f) => (
-                <li key={f.id}>
-                  <button
-                    type="button"
-                    data-feature={f.title}
-                    tabIndex={i === page ? 0 : -1}
-                    onClick={() => onPick(f)}
-                    title={f.expects.join("\n")}
-                    className="flex h-full min-h-[104px] w-full flex-col gap-1 rounded-[10px] border border-md-outline-variant bg-md-surface-container-lowest p-3 text-left transition-colors hover:border-md-primary hover:bg-md-surface-container-low"
-                  >
-                    <span className="flex items-center gap-1.5">
-                      <span
-                        className="material-symbols-outlined text-[16px] text-md-primary"
-                        aria-hidden
-                      >
-                        {icon(f)}
-                      </span>
-                      <span className="truncate text-[10.5px] font-medium tracking-[0.02em] text-md-on-surface-variant">
-                        {f.category}
-                      </span>
-                    </span>
-                    <span className="text-[13px] font-semibold leading-snug text-md-on-surface">
-                      {f.title}
-                    </span>
-                    <span className="line-clamp-2 text-[11.5px] leading-[1.5] text-md-on-surface-variant">
-                      {f.subtitle}
-                    </span>
-                    {f.expects.length ? (
-                      <span className="sr-only">{f.expects.join(" · ")}</span>
-                    ) : null}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ))}
-        </div>
-
-        {total > 1 ? (
-          <>
-            <button
-              type="button"
-              aria-label="이전 기능"
-              disabled={page === 0}
-              onClick={() => go(page - 1)}
-              className={arrow + " -left-11"}
-            >
-              <span className="material-symbols-outlined text-[20px]" aria-hidden>
-                chevron_left
-              </span>
-            </button>
-            <button
-              type="button"
-              aria-label="다음 기능"
-              disabled={page >= total - 1}
-              onClick={() => go(page + 1)}
-              className={arrow + " -right-11"}
-            >
-              <span className="material-symbols-outlined text-[20px]" aria-hidden>
-                chevron_right
-              </span>
-            </button>
-          </>
-        ) : null}
-      </div>
-
-      {total > 1 ? (
-        <div className="mt-3 flex items-center justify-center gap-2" aria-hidden>
-          {pages.map((_, i) => (
-            <button
-              key={i}
-              type="button"
-              tabIndex={-1}
-              onClick={() => go(i)}
-              className={
-                "h-1.5 rounded-full transition-all " +
-                (i === page ? "w-5 bg-md-primary" : "w-1.5 bg-md-outline-variant hover:bg-md-on-surface-variant")
-              }
-            />
-          ))}
-          <span className="ml-1 text-[11px] tabular-nums text-md-on-surface-variant">
-            {page + 1} / {total}
+          <span className="flex items-center gap-1.5">
+            <span className="material-symbols-outlined text-[16px] text-md-primary" aria-hidden>{icon(f)}</span>
+            <span className="truncate text-[10.5px] font-medium tracking-[0.02em] text-md-on-surface-variant">{f.category}</span>
           </span>
-        </div>
-      ) : null}
-    </div>
+          <span className="text-[13px] font-semibold leading-snug text-md-on-surface">{f.title}</span>
+          <span className="line-clamp-2 text-[11.5px] leading-[1.5] text-md-on-surface-variant">{f.subtitle}</span>
+          {f.expects.length ? <span className="sr-only">{f.expects.join(" · ")}</span> : null}
+        </button>
+      )}
+    />
   );
 }

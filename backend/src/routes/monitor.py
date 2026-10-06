@@ -213,16 +213,15 @@ async def create_monitor_thread(request: Request):
     if not isinstance(body, dict):
         body = {}
 
+    # 대상 이름 **필수**(2026-10-06) — 대시보드 카드 제목이 비면 무엇을 보는 대상인지 모른다.
+    title = str(body.get("title") or "").strip()
+    if not title:
+        raise HTTPException(status_code=422, detail="모니터링 대상 이름을 적어 주세요")
     tid = f"t_{uuid.uuid4().hex}"
     repo = get_threads_repo()
     repo.ensure_thread(tid, user_id=user_id)
     repo.set_kind(tid, "monitor")
-    title = str(body.get("title") or "").strip()
-    if title:
-        try:
-            repo.set_title(tid, title[:120])
-        except Exception:  # noqa: BLE001 — 제목은 선택
-            _log.debug("set_title 실패", exc_info=True)
+    repo.set_title(tid, title[:120])
     _log.info("monitor thread 생성 %s", tid)
     return {"thread_id": tid, "kind": "monitor", "title": title or None}
 
@@ -237,13 +236,20 @@ def list_monitor_threads(request: Request):
     rows = [t for t in get_threads_repo().list_for_user(user_id, limit=200)
             if (t.get("kind") or "chat") == "monitor"]
     ids = [t["id"] for t in rows]
-    unread = get_monitor_alert_repo().unread_counts(ids)
+    # 대시보드 카드 재료(2026-10-06): 미해제 변경 수·kind 별·최신 1건·마지막 확인.
+    summ = get_monitor_alert_repo().summary_for_threads(ids)
     wrepo = get_monitor_watch_repo()
     out = []
     for t in rows:
+        sm = summ.get(t["id"]) or {}
         out.append({**t,
                     "watch_count": wrepo.count_for_thread(t["id"]),
-                    "unread_alerts": unread.get(t["id"], 0)})
+                    "unread_alerts": sm.get("unread_alerts", 0),
+                    "changed_count": sm.get("changed_count", 0),
+                    "kinds": sm.get("kinds") or {},
+                    "latest_alert": sm.get("latest_alert"),
+                    # 점검 시각: 명시 기록이 우선, 없으면 최신 알람 시각
+                    "last_checked_at": t.get("monitor_checked_at") or sm.get("last_alert_at")})
     return {"threads": out}
 
 
@@ -473,8 +479,11 @@ async def thread_alert_report(thread_id: str, request: Request):
         id=rid, thread_id=thread_id, mode="deep", kind="doc", status="done",
         blob_uri=blob_uri, title=title, summary="규제 변경 보고",
         citations_json="[]", completed_at=None, filled_values="{}"))
-    _log.info("monitor report %s (알람 %d건)", rid, len(alerts))
-    return {"report_id": rid, "title": title, "alerts": len(alerts)}
+    # 보고서가 곧 "처리했다"는 증거(2026-10-06 결정) — 담긴 알람을 읽음 처리해 대시보드
+    # 숫자에서 뺀다. 열람·패널 열기로는 해제하지 않는다.
+    marked = await _a.to_thread(get_monitor_alert_repo().mark_thread_read, thread_id)
+    _log.info("monitor report %s (알람 %d건, 읽음 처리 %d)", rid, len(alerts), marked)
+    return {"report_id": rid, "title": title, "alerts": len(alerts), "marked_read": marked}
 
 
 @router.post("/monitor/threads/{thread_id}/send")

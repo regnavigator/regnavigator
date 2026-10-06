@@ -79,7 +79,7 @@ def test_chat_threads_are_not_listed_as_monitor(api):
 # ── ② 관찰 목록 ────────────────────────────────────────────────────────────
 
 def test_watch_add_remove_and_restore(api):
-    tid = api.post("/monitor/threads", json={}).json()["thread_id"]
+    tid = api.post("/monitor/threads", json={"title": "테스트 대상"}).json()["thread_id"]
 
     r = api.post(f"/monitor/threads/{tid}/watch", json={
         "citations": [_cite("004097_0025001", "식품위생법 시행령 제25조")],
@@ -97,7 +97,7 @@ def test_watch_add_remove_and_restore(api):
 
 def test_web_citations_cannot_be_watched_but_are_reported(api):
     """웹 인용은 조문 키가 없어 관찰할 수 없다 — 조용히 빼지 않고 알린다."""
-    tid = api.post("/monitor/threads", json={}).json()["thread_id"]
+    tid = api.post("/monitor/threads", json={"title": "테스트 대상"}).json()["thread_id"]
     r = api.post(f"/monitor/threads/{tid}/watch", json={
         "citations": [{"id": "cite_web_x", "title": "어떤 블로그",
                        "source_kind": "web"}]})
@@ -107,7 +107,7 @@ def test_web_citations_cannot_be_watched_but_are_reported(api):
 
 def test_suggest_marks_already_watched(api):
     """이미 관찰 중인 것은 '다시 추가' 가 아니라 '이미 있음' 으로 보여야 한다."""
-    tid = api.post("/monitor/threads", json={}).json()["thread_id"]
+    tid = api.post("/monitor/threads", json={"title": "테스트 대상"}).json()["thread_id"]
     from src.persistence.threads_repo import get_threads_repo
 
     get_threads_repo().merge_steps(tid, [{
@@ -124,7 +124,7 @@ def test_suggest_marks_already_watched(api):
 
 def test_no_alerts_when_law_db_is_unavailable(api, monkeypatch):
     """**확인 못 함 ≠ 변경 없음.** DB 가 죽었으면 알람을 만들지 않는다."""
-    tid = api.post("/monitor/threads", json={}).json()["thread_id"]
+    tid = api.post("/monitor/threads", json={"title": "테스트 대상"}).json()["thread_id"]
     api.post(f"/monitor/threads/{tid}/watch",
              json={"citations": [_cite("A_1", "법 제1조")]})
 
@@ -136,7 +136,7 @@ def test_no_alerts_when_law_db_is_unavailable(api, monkeypatch):
 
 def test_same_change_is_not_alerted_twice(api, monkeypatch):
     """중복 알람이 오면 사용자는 알람을 끈다 — 그 순간 이 기능이 죽는다."""
-    tid = api.post("/monitor/threads", json={}).json()["thread_id"]
+    tid = api.post("/monitor/threads", json={"title": "테스트 대상"}).json()["thread_id"]
     api.post(f"/monitor/threads/{tid}/watch",
              json={"citations": [_cite("A_1", "법 제1조")]})
 
@@ -177,7 +177,7 @@ def test_alert_inbox_filters_and_read_state(api, monkeypatch):
 
 
 def test_thread_list_shows_unread_badge(api, monkeypatch):
-    tid = api.post("/monitor/threads", json={}).json()["thread_id"]
+    tid = api.post("/monitor/threads", json={"title": "테스트 대상"}).json()["thread_id"]
     api.post(f"/monitor/threads/{tid}/watch",
              json={"citations": [_cite("A_1", "법 제1조")]})
     monkeypatch.setattr(
@@ -214,7 +214,7 @@ def test_thread_report_renders_alerts(api, monkeypatch):
 
 def test_empty_report_distinguishes_no_change_from_unchecked(api):
     """변경 0건 보고서도 "확인 못 한 구간이 있을 수 있다"를 말해야 한다."""
-    tid = api.post("/monitor/threads", json={}).json()["thread_id"]
+    tid = api.post("/monitor/threads", json={"title": "테스트 대상"}).json()["thread_id"]
     rid = api.post(f"/monitor/threads/{tid}/report", json={}).json()["report_id"]
 
     from src.persistence import get_blob_store, get_reports_repo
@@ -242,7 +242,7 @@ def test_invalid_email_rejected(api):
 
 
 def test_send_requires_recipients(api):
-    tid = api.post("/monitor/threads", json={}).json()["thread_id"]
+    tid = api.post("/monitor/threads", json={"title": "테스트 대상"}).json()["thread_id"]
     rid = api.post(f"/monitor/threads/{tid}/report", json={}).json()["report_id"]
     r = api.post(f"/monitor/threads/{tid}/send",
                  json={"report_id": rid, "recipients": []})
@@ -257,7 +257,7 @@ def test_send_registers_recipients_in_contacts(api, monkeypatch):
     monkeypatch.setattr("src.observability.notifications.send_email",
                         lambda to, subj, html: sent.append(to))
 
-    tid = api.post("/monitor/threads", json={}).json()["thread_id"]
+    tid = api.post("/monitor/threads", json={"title": "테스트 대상"}).json()["thread_id"]
     rid = api.post(f"/monitor/threads/{tid}/report", json={}).json()["report_id"]
     r = api.post(f"/monitor/threads/{tid}/send",
                  json={"report_id": rid, "recipients": ["new@firm.co.kr"]})
@@ -270,7 +270,7 @@ def test_send_reports_failure_when_smtp_missing(api, monkeypatch):
     """SMTP 가 없으면 **조용히 성공하지 않는다** — 안 갔는데 갔다고 하면 안 된다."""
     monkeypatch.setattr("src.observability.notifications.is_configured",
                         lambda: False)
-    tid = api.post("/monitor/threads", json={}).json()["thread_id"]
+    tid = api.post("/monitor/threads", json={"title": "테스트 대상"}).json()["thread_id"]
     rid = api.post(f"/monitor/threads/{tid}/report", json={}).json()["report_id"]
     r = api.post(f"/monitor/threads/{tid}/send",
                  json={"report_id": rid, "recipients": ["a@b.co.kr"]})
@@ -308,7 +308,7 @@ def test_convert_chat_thread_to_monitor(api):
 
 def test_convert_back_keeps_watch_list(api):
     """되돌려도 관찰 목록은 남는다 — 전환은 분류 변경이지 삭제가 아니다."""
-    tid = api.post("/monitor/threads", json={}).json()["thread_id"]
+    tid = api.post("/monitor/threads", json={"title": "테스트 대상"}).json()["thread_id"]
     api.post(f"/monitor/threads/{tid}/watch",
              json={"citations": [_cite("A_1", "법 제1조")]})
 

@@ -68,6 +68,8 @@ import {
 } from "@/lib/store/mode";
 import { MonitorWorkDialog } from "@/components/monitor/MonitorWorkDialog";
 import { WATCH_CHANGED_EVENT } from "@/components/monitor/WatchPanel";
+import { MONITOR_CHANGED_EVENT } from "@/components/thread/ThreadList";
+import { listMonitorThreads } from "@/lib/client/monitorThreads";
 import { addWatch, listWatch, removeWatch } from "@/lib/client/monitorThreads";
 import type { ChatState } from "@/lib/store/types";
 import { type Feature, briefKindOf, featuresFor } from "@/lib/features/catalog";
@@ -84,9 +86,10 @@ import {
 import {
   type Composition,
   type CompositionStep,
-  saveComposition,
-  fromTemplate,
+  emptyStep,
   featureMeta,
+  fromTemplate,
+  saveComposition,
   stepMessage,
   suggestValues,
   toTemplateSteps,
@@ -532,6 +535,39 @@ function PageShellInner() {
     void reloadWatched();
   }, [reloadWatched]);
 
+  // 모니터 스레드(2026-10-06) — 입력창 "조문 개정 영향 범위" 버튼: 기능 폼을 바로 실행.
+  // 관찰 조문이 있으면 첫 번째를 기본 입력으로(사용자가 폼에서 고칠 수 있다 — 기능 카드).
+  const runImpactScope = useCallback(() => {
+    const all = featuresFor({ mode, hasTurns: true });
+    const f = all.find((x) => x.id === "impact_graph");
+    if (!f) return;
+    const first = [...watchedKeys][0];
+    const values: Record<string, string> = first ? { article: first } : {};
+    const st = { ...emptyStep(f), values };
+    runFeatureNow(f, st);
+  }, [mode, watchedKeys, runFeatureNow]);
+
+  // 모니터 스레드 미확인 변경 수 — 관찰 목록 버튼 배지. 목록 API 를 가볍게 재사용.
+  const [monitorUnread, setMonitorUnread] = useState(0);
+  useEffect(() => {
+    if (!threadId || !isMonitorThread) { setMonitorUnread(0); return; }
+    let cancelled = false;
+    const load = () => {
+      listMonitorThreads().then((r) => {
+        if (cancelled) return;
+        setMonitorUnread(r.threads.find((t) => t.id === threadId)?.unread_alerts ?? 0);
+      }).catch(() => {});
+    };
+    load();
+    window.addEventListener(MONITOR_CHANGED_EVENT, load);
+    window.addEventListener(WATCH_CHANGED_EVENT, load);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(MONITOR_CHANGED_EVENT, load);
+      window.removeEventListener(WATCH_CHANGED_EVENT, load);
+    };
+  }, [threadId, isMonitorThread]);
+
   const watchApi = useMemo(() => {
     const tid = threadId;
     if (!tid || !isMonitorThread) return undefined;
@@ -792,6 +828,8 @@ function PageShellInner() {
             templates={showPro ? templates : undefined}
             presets={showPro ? PRESET_TASKS : undefined}
             onPickTemplate={(t) => void openComposer(t)}
+            monitorUnread={monitorUnread}
+            onImpactScope={runImpactScope}
           />
         </div>
 
@@ -946,6 +984,8 @@ function PageShellInner() {
                 templates={showPro ? templates : undefined}
               presets={showPro ? PRESET_TASKS : undefined}
               onPickTemplate={(t) => void openComposer(t)}
+              monitorUnread={monitorUnread}
+              onImpactScope={runImpactScope}
             />
           </Panel>
 
@@ -1049,6 +1089,9 @@ type ChatColumnProps = {
   templates?: TaskTemplate[];
   presets?: PresetTask[];
   onPickTemplate?: (t: { steps: TaskTemplate["steps"] }) => void;
+  /** 모니터 스레드(2026-10-06) — 관찰 버튼 배지 · 영향 범위 실행 */
+  monitorUnread?: number;
+  onImpactScope?: () => void;
 };
 
 /**
@@ -1116,6 +1159,8 @@ function ChatColumn({
   templates,
   presets,
   onPickTemplate,
+  monitorUnread = 0,
+  onImpactScope,
 }: ChatColumnProps) {
   const { mode } = useMode();
   const router = useRouter();
@@ -1550,6 +1595,8 @@ function ChatColumn({
               threadId={threadId}
               confidentialSeen={!!state.confidential_seen}
               isMonitor={state.kind === "monitor"}
+              monitorUnread={monitorUnread}
+              onImpactScope={state.kind === "monitor" ? onImpactScope : undefined}
               running={chatActive}
               disabled={!configured}
               overLimit={overLimit}
@@ -1720,6 +1767,8 @@ function ChatColumn({
               threadId={threadId}
               confidentialSeen={!!state.confidential_seen}
               isMonitor={state.kind === "monitor"}
+              monitorUnread={monitorUnread}
+              onImpactScope={state.kind === "monitor" ? onImpactScope : undefined}
               running={chatActive}
               disabled={!configured}
               overLimit={overLimit}

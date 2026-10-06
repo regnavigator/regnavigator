@@ -21,6 +21,7 @@ import { FeatureCards } from "@/components/feature/FeatureCards";
 import { FeatureDialog } from "@/components/feature/FeatureDialog";
 import { featuresFor, type Feature } from "@/lib/features/catalog";
 import { useRunFeature } from "@/lib/features/useRunFeature";
+import { MonitorDashboard } from "@/components/monitor/MonitorDashboard";
 
 function getTimeGreeting(): string {
   const h = new Date().getHours();
@@ -103,6 +104,11 @@ export function EmptyHero({ configured, onPickPrompt, templates, presets, onPick
         </p>
       </div>
     );
+  }
+
+  // 규제 모니터링 모드(2026-10-06) — 첫 화면은 기능 타일이 아니라 **대상 대시보드**다.
+  if (mode === "monitor") {
+    return <MonitorDashboard greeting={greeting} />;
   }
 
   return (

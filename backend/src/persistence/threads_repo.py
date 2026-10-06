@@ -193,6 +193,8 @@ class SqliteThreadsRepo(SqliteRepoBase):
             # 기능 조합 워크플로(2026-10-02) — {"steps": [feature_id], "cursor": n}.
             # 스레드에 둔다: 새로고침·다른 기기에서도 진행 중인 단계가 살아야 한다.
             "ALTER TABLE chat_threads ADD COLUMN workflow_json TEXT",
+            # 모니터링 "마지막 확인" 시각(2026-10-06) — 알람이 없어도 점검했음을 남긴다.
+            "ALTER TABLE chat_threads ADD COLUMN monitor_checked_at TEXT",
             "CREATE INDEX IF NOT EXISTS idx_chat_threads_user "
             "ON chat_threads(user_id, pinned DESC, updated_at DESC)",
         ):
@@ -289,6 +291,12 @@ class SqliteThreadsRepo(SqliteRepoBase):
             c.execute("UPDATE chat_threads SET kind = ? WHERE id = ?",
                       (kind, thread_id))
 
+    def set_monitor_checked(self, thread_id: str, at: Optional[str] = None) -> None:
+        """모니터링 점검 시각 기록(2026-10-06) — 변경이 없어도 '언제 봤는지'는 남아야 한다."""
+        with self._lock, self._conn() as c:
+            c.execute("UPDATE chat_threads SET monitor_checked_at = ? WHERE id = ?",
+                      (at or utcnow_iso(), thread_id))
+
     def get_workflow(self, thread_id: str) -> Optional[dict]:
         """진행 중인 기능 조합 — {"steps": [...], "cursor": n}. 없으면 None."""
         with self._lock, self._conn() as c:
@@ -342,14 +350,14 @@ class SqliteThreadsRepo(SqliteRepoBase):
             if user_id is None:  # dev 무인증 — 전체(로컬 개발 편의)
                 rows = c.execute(
                     "SELECT id, user_id, title, created_at, updated_at, "
-                    "COALESCE(pinned, 0) AS pinned, COALESCE(kind, 'chat') AS kind FROM chat_threads "
+                    "COALESCE(pinned, 0) AS pinned, COALESCE(kind, 'chat') AS kind, monitor_checked_at FROM chat_threads "
                     "ORDER BY pinned DESC, updated_at DESC LIMIT ?",
                     (limit,),
                 ).fetchall()
             else:
                 rows = c.execute(
                     "SELECT id, user_id, title, created_at, updated_at, "
-                    "COALESCE(pinned, 0) AS pinned, COALESCE(kind, 'chat') AS kind FROM chat_threads WHERE user_id = ? "
+                    "COALESCE(pinned, 0) AS pinned, COALESCE(kind, 'chat') AS kind, monitor_checked_at FROM chat_threads WHERE user_id = ? "
                     "ORDER BY pinned DESC, updated_at DESC LIMIT ?",
                     (user_id, limit),
                 ).fetchall()
@@ -717,14 +725,14 @@ class PostgresThreadsRepo:
             if user_id is None:
                 cur.execute(
                     "SELECT id, user_id, title, created_at, updated_at, "
-                    "COALESCE(pinned, FALSE) AS pinned, COALESCE(kind, 'chat') AS kind "
+                    "COALESCE(pinned, FALSE) AS pinned, COALESCE(kind, 'chat') AS kind, monitor_checked_at "
                     "FROM chat_threads "
                     "ORDER BY pinned DESC, updated_at DESC LIMIT %s", (limit,),
                 )
             else:
                 cur.execute(
                     "SELECT id, user_id, title, created_at, updated_at, "
-                    "COALESCE(pinned, FALSE) AS pinned, COALESCE(kind, 'chat') AS kind "
+                    "COALESCE(pinned, FALSE) AS pinned, COALESCE(kind, 'chat') AS kind, monitor_checked_at "
                     "FROM chat_threads WHERE user_id = %s "
                     "ORDER BY pinned DESC, updated_at DESC LIMIT %s", (user_id, limit),
                 )

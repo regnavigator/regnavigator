@@ -232,6 +232,7 @@ ALTER TABLE chat_threads ADD COLUMN IF NOT EXISTS confidential_seen INTEGER NOT 
 ALTER TABLE chat_threads ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'chat';
 ALTER TABLE chat_threads ADD COLUMN IF NOT EXISTS pinned BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE chat_threads ADD COLUMN IF NOT EXISTS workflow_json TEXT;
+ALTER TABLE chat_threads ADD COLUMN IF NOT EXISTS monitor_checked_at TEXT;
 -- 사이드바 목록(list_for_user): user_id 필터 + pinned/updated_at 정렬 커버.
 CREATE INDEX IF NOT EXISTS idx_chat_threads_user
   ON chat_threads(user_id, pinned DESC, updated_at DESC);

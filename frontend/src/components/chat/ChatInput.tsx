@@ -60,6 +60,10 @@ type Props = {
   threadId?: string | null;
   /** 모니터링 스레드인가 — 관찰 목록 버튼 노출 기준(2026-10-02) */
   isMonitor?: boolean;
+  /** 모니터 스레드 — 미확인 변경 수(관찰 목록 버튼 배지, 2026-10-06) */
+  monitorUnread?: number;
+  /** 모니터 스레드 — "조문 개정 영향 범위" 기능 바로 실행(2026-10-06) */
+  onImpactScope?: () => void;
   /** 심층 보고서 수동 트리거 — 대화가 있는 idle 상태에서 호스트가 전달.
    *  미전달 시 버튼 숨김(첫 화면·진행 중·한도 초과). */
   onManualReport?: (purpose?: string | null) => void;
@@ -95,6 +99,8 @@ export function ChatInput({
   confidentialSeen = false,
   threadId = null,
   isMonitor = false,
+  monitorUnread = 0,
+  onImpactScope,
   prefill,
   prefillHint,
   onPrefillConsumed,
@@ -569,7 +575,7 @@ export function ChatInput({
             {/* 기밀 모드 — 전문가 경로 전용(2026-10-01). 켜면 이 대화는 온프레미스
                 모델로만 처리되고 웹 검색 도구가 부여되지 않는다. 사건 파일·의뢰인
                 사실관계를 다룰 때 쓴다. */}
-            {showPro ? (
+            {showPro && !isMonitor ? (
               <button
                 type="button"
                 data-testid="confidential-toggle"
@@ -634,18 +640,42 @@ export function ChatInput({
             {/* 관찰 목록(2026-10-02) — 모니터링 스레드에서만. 이 스레드가 무엇을
                 보고 있는지는 늘 한 번에 열려야 한다. */}
             {isMonitor ? (
-              <button
-                type="button"
-                data-testid="watch-open"
-                onClick={() => window.dispatchEvent(new CustomEvent(OPEN_WATCH_EVENT))}
-                title="이 대상이 관찰 중인 조문"
-                className="inline-flex h-9 items-center gap-1.5 rounded-full px-3.5 text-[13px] font-medium text-md-on-surface-variant transition-colors hover:bg-md-surface-container-low hover:text-md-on-surface"
-              >
-                <span className="material-symbols-outlined text-[16px]" aria-hidden>
-                  visibility
-                </span>
-                관찰 목록
-              </button>
+              <>
+                <button
+                  type="button"
+                  data-testid="watch-open"
+                  onClick={() => window.dispatchEvent(new CustomEvent(OPEN_WATCH_EVENT))}
+                  title="이 대상이 관찰 중인 조문 · 지금 변경 확인 · 변경 보고서"
+                  className="inline-flex h-9 items-center gap-1.5 rounded-full px-3.5 text-[13px] font-medium text-md-on-surface-variant transition-colors hover:bg-md-surface-container-low hover:text-md-on-surface"
+                >
+                  <span className="material-symbols-outlined text-[16px]" aria-hidden>
+                    visibility
+                  </span>
+                  관찰 목록 · 변경 확인
+                  {monitorUnread > 0 ? (
+                    <span data-testid="watch-unread" className="rounded-pill bg-md-error px-1.5 text-[10px] font-semibold text-md-on-error">
+                      {monitorUnread}
+                    </span>
+                  ) : null}
+                </button>
+                {/* 조문 개정 영향 범위(2026-10-06) — 모니터링 스레드의 두 번째(마지막) 기능.
+                    기능 폼을 바로 실행한다(기능 카드 말풍선). 관찰 조문이 있으면 그걸 기본 입력으로. */}
+                {onImpactScope ? (
+                  <button
+                    type="button"
+                    data-testid="impact-open"
+                    onClick={onImpactScope}
+                    disabled={running || overLimit}
+                    title="관찰 중인 조문이 바뀌면 같이 흔들리는 곳"
+                    className="inline-flex h-9 items-center gap-1.5 rounded-full px-3.5 text-[13px] font-medium text-md-on-surface-variant transition-colors hover:bg-md-surface-container-low hover:text-md-on-surface disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <span className="material-symbols-outlined text-[16px]" aria-hidden>
+                      hub
+                    </span>
+                    조문 개정 영향 범위
+                  </button>
+                ) : null}
+              </>
             ) : null}
             {/* 기능연계(2026-10-05) — 전문가 전용. 기능 하나를 바로 실행하거나 여러
                 기능을 연계하는 패널을 우측에 연다. 종전의 입력창 팝오버 피커와 조합
@@ -669,7 +699,7 @@ export function ChatInput({
             {/* 의견서 초안 — 지금까지의 대화와 그 인용으로 서면 골격을 만든다
                 (2026-10-01). 보고서와 달리 **즉시** 열리고, 내용은 문단 단위로
                 고쳐 채운다. 전문가 경로 전용. */}
-            {showPro && onManualReport ? (
+            {showPro && !isMonitor && onManualReport ? (
               <button
                 type="button"
                 data-testid="brief-open"
@@ -686,7 +716,7 @@ export function ChatInput({
             ) : null}
             {/* 심층 보고서 수동 트리거 — AI 제안(next_steps)에만 의존하던 발견성 개선.
                 일반 상담 모드에서는 감춘다(2026-10-01 모드 분기). */}
-            {onManualReport && showPro ? (
+            {onManualReport && showPro && !isMonitor ? (
               <Popover>
                 <PopoverTrigger asChild>
                   <button

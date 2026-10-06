@@ -57,6 +57,7 @@ class MonitorAlertRepo(Protocol):
     def dismiss(self, alert_id: str) -> bool: ...
     def mark_thread_read(self, thread_id: str) -> int: ...
     def delete_thread(self, thread_id: str) -> int: ...
+    def summary_for_threads(self, thread_ids: list[str]) -> dict[str, dict]: ...
 
 
 _COLS = ("id", "thread_id", "article_key", "kind", "summary", "payload_json",
@@ -147,6 +148,41 @@ class SqliteMonitorAlertRepo(SqliteRepoBase):
                 tuple(thread_ids),
             ).fetchall()
         return {r["thread_id"]: int(r["n"]) for r in rows}
+
+    def summary_for_threads(self, thread_ids) -> dict[str, dict]:
+        """대시보드 카드 재료(2026-10-06) — 스레드별 **미해제** 알람 집계. N+1 금지(GROUP BY 2회).
+
+        반환: {tid: {"changed_count", "unread_alerts", "kinds": {kind: n},
+                     "latest_alert": {"summary","kind","detected_at"} | None,
+                     "last_alert_at": str | None}}
+        """
+        if not thread_ids:
+            return {}
+        ph = ",".join("?" * len(thread_ids))
+        out: dict[str, dict] = {
+            t: {"changed_count": 0, "unread_alerts": 0, "kinds": {},
+                "latest_alert": None, "last_alert_at": None} for t in thread_ids}
+        with self._lock, self._conn() as c:
+            for r in c.execute(
+                f"SELECT thread_id, kind, COUNT(*) n, SUM(CASE WHEN read_at IS NULL THEN 1 ELSE 0 END) u "
+                f"FROM monitor_alert WHERE thread_id IN ({ph}) AND dismissed_at IS NULL "
+                f"GROUP BY thread_id, kind", tuple(thread_ids)).fetchall():
+                d = out[r["thread_id"]]
+                d["changed_count"] += int(r["n"]); d["unread_alerts"] += int(r["u"] or 0)
+                d["kinds"][r["kind"]] = int(r["n"])
+            # 최신 1건 — 스레드별 MAX(detected_at) 행. 같은 날 여러 건이면 아무거나(요약 1줄 용도).
+            for r in c.execute(
+                f"SELECT a.thread_id, a.summary, a.kind, a.detected_at FROM monitor_alert a "
+                f"JOIN (SELECT thread_id, MAX(detected_at) m FROM monitor_alert "
+                f"      WHERE thread_id IN ({ph}) AND dismissed_at IS NULL GROUP BY thread_id) x "
+                f"ON a.thread_id = x.thread_id AND a.detected_at = x.m "
+                f"WHERE a.dismissed_at IS NULL", tuple(thread_ids)).fetchall():
+                d = out[r["thread_id"]]
+                if d["latest_alert"] is None:
+                    d["latest_alert"] = {"summary": r["summary"], "kind": r["kind"],
+                                         "detected_at": r["detected_at"]}
+                    d["last_alert_at"] = r["detected_at"]
+        return out
 
     def _stamp(self, alert_id: str, col: str) -> bool:
         with self._lock, self._conn() as c:

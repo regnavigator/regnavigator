@@ -8,12 +8,20 @@
 import { apiFetch } from "@/lib/api/client";
 import type { Citation } from "@/lib/store/types";
 
+export type AlertKind = "repealed" | "pending" | "amended" | "effective_date";
+
 export type MonitorThread = {
   id: string;
   title: string | null;
+  created_at?: string;
   updated_at?: string;
   watch_count: number;
   unread_alerts: number;
+  /** 대시보드(2026-10-06) — 미해제 변경 수·kind 별·최신 1건·마지막 점검 */
+  changed_count?: number;
+  kinds?: Partial<Record<AlertKind, number>>;
+  latest_alert?: { summary: string; kind: AlertKind; detected_at: string } | null;
+  last_checked_at?: string | null;
 };
 
 export type WatchItem = {
@@ -48,7 +56,7 @@ export type MonitorAlert = {
   payload: Record<string, unknown>;
 };
 
-export function createMonitorThread(title?: string) {
+export function createMonitorThread(title: string) {
   return apiFetch<{ thread_id: string; kind: string; title: string | null }>(
     "/monitor/threads",
     { method: "POST", body: JSON.stringify({ title }) },
@@ -117,7 +125,7 @@ export function detectNow(threadId: string) {
 }
 
 export function buildThreadReport(threadId: string, since?: string) {
-  return apiFetch<{ report_id: string; title: string; alerts: number }>(
+  return apiFetch<{ report_id: string; title: string; alerts: number; marked_read?: number }>(
     `/monitor/threads/${encodeURIComponent(threadId)}/report`,
     { method: "POST", body: JSON.stringify({ since }) },
   );

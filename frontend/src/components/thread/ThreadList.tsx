@@ -261,8 +261,11 @@ export function ThreadList({ configured, refreshKey, onError, onCollapse, onOpen
     // 모드 안에서는 **한 종류만** 만든다(2026-10-02). 모니터링 모드에서 이 버튼이
     // 일반 대화를 만들면 "모니터링 대상 추가와 뭐가 다르냐"가 된다(실사용 지적).
     if (mode === "monitor") {
+      // 대상 이름 필수(2026-10-06) — 카드 제목이 비면 무엇을 보는지 모른다.
+      const name = window.prompt("모니터링 대상 이름을 적어 주세요 (예: 아크로제약 수입규제)")?.trim();
+      if (!name) return;
       try {
-        const r = await createMonitorThread();
+        const r = await createMonitorThread(name);
         window.dispatchEvent(new CustomEvent(MONITOR_CHANGED_EVENT));
         router.push(`/new?threadId=${encodeURIComponent(r.thread_id)}`);
       } catch {
@@ -1572,9 +1575,11 @@ function MonitorSection({ refreshKey }: { refreshKey: number }) {
 
   const create = async () => {
     if (busy) return;
+    const name = window.prompt("모니터링 대상 이름을 적어 주세요 (예: 아크로제약 수입규제)")?.trim();
+    if (!name) return;
     setBusy(true);
     try {
-      const r = await createMonitorThread();
+      const r = await createMonitorThread(name);
       await load();
       router.push(`/new?threadId=${encodeURIComponent(r.thread_id)}`);
     } catch {
@@ -1609,13 +1614,6 @@ function MonitorSection({ refreshKey }: { refreshKey: number }) {
             </span>
           ) : null}
         </button>
-        <Link
-          href="/alerts"
-          title="알람 모아보기"
-          className="material-symbols-outlined text-[15px] text-md-on-surface-variant hover:text-md-primary"
-        >
-          notifications
-        </Link>
         <Link
           href="/monitor"
           title="정기 리포트 배송 설정"

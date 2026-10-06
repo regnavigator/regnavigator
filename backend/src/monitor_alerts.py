@@ -53,8 +53,11 @@ def detect_for_thread(thread_id: str, *, day: Optional[str] = None) -> dict:
     from src.persistence import get_monitor_alert_repo, get_monitor_watch_repo
     from src.persistence.monitor_alert_repo import Alert
 
+    from src.persistence.threads_repo import get_threads_repo
+
     watch = get_monitor_watch_repo().list_for_thread(thread_id)
     if not watch:
+        get_threads_repo().set_monitor_checked(thread_id)
         return {"checked": 0, "changed": 0, "created": 0, "complete": True}
 
     changes, status = detect_with_status(watch)
@@ -85,6 +88,8 @@ def detect_for_thread(thread_id: str, *, day: Optional[str] = None) -> dict:
         )):
             created += 1
 
+    # 점검 완료 시각 — 변경이 0건이어도 남긴다(대시보드 "마지막 확인"). 확인 불가면 안 남긴다.
+    get_threads_repo().set_monitor_checked(thread_id)
     return {"checked": status.get("checked", 0), "changed": len(changes),
             "created": created, "complete": True}
 

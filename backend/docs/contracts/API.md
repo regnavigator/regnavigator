@@ -699,6 +699,12 @@ GET /law-graph?keys=006364_000100,001275_000700&depth=1&rels=CITES&per_node_cap=
 LLM `doc_kinds` 선택 때만 쓴다. 법령 개정 상태는 `POST /openlaw/amendment-status`(`amendment_status()`) 로
 서버 판정(current·repealed·pending)을 받을 수 있다 — 현행본 고지의 보조 근거.
 
+**모니터링 대시보드 (2026-10-06).** `GET /monitor/threads` 의 각 스레드에 `changed_count`(미해제 알림 수),
+`kinds`({repealed|amended|pending|effective_date: n}), `latest_alert`({summary, kind, detected_at} | null),
+`last_checked_at`(명시 점검 시각 `monitor_checked_at`, 없으면 최신 알림 시각) 이 추가됐다. `POST /monitor/threads`
+는 `title` **필수**(빈 값 422). `POST /monitor/threads/{tid}/report` 는 보고서 생성 직후 그 스레드의 미읽음
+알림을 읽음 처리하고 `marked_read: n` 을 돌려준다 — 대시보드의 "확인 안 한 변경"은 이 시점에 줄어든다.
+
 `POST /documents/from-brief` 는 `kind`(`opinion`(기본)·`review`·`demand`·`answer`·`inquiry`, 10-06)를 받아
 그 종류의 골격(`src/brief.BRIEF_KINDS`)으로 초안을 만든다. 숨은 턴(연계 중간 단계)은 재료에서 뺀다.
 
